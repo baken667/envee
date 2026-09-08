@@ -191,15 +191,19 @@ Packages with tests:
   internal/directive   (Apply orchestrator: file, path, profile, secret, template)
   internal/dotenv      (.env parser, hand-written state machine)
   internal/env         (Map type, diff, merge)
+  internal/log         (redaction of sensitive attributes)
+  internal/paths       (XDG path invariants)
+  internal/plugin      (subprocess protocol: timeouts, bad exits, malformed
+                        output, dispatch)
   internal/resolver    (discovery, merge, trust source tracking)
   internal/shell       (bash/zsh/fish/nu/pwsh adapters; escaping is round-tripped
                         through real bash, zsh and fish)
   internal/template    (Jinja-lite, cycle detection)
   internal/trust       (XDG_DATA_HOME store, summary)
+  pkg/sdk-go           (plugin wire protocol, driven end to end as a subprocess)
 ```
 
-Not yet covered: `internal/plugin`, `internal/daemon`, `internal/errs`,
-`internal/log`, `internal/paths`, `pkg/sdk-go`.
+Not yet covered: `internal/daemon` and `internal/errs`.
 
 ## Development
 
