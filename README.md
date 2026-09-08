@@ -24,12 +24,12 @@ echo $DATABASE_URL     # env vars are loaded automatically
 | Feature | direnv | mise | **envee** |
 |---|---|---|---|
 | Config format | bash (`.envrc`) | TOML | **TOML (`envee.toml`)** |
-| Trust model | hash | hash | **hash + signature + static analysis** |
+| Trust model | hash | hash | **hash + static analysis** (`envee check`; ed25519 signing is planned) |
 | Profiles (dev/staging/prod) | manual `source_env` | `MISE_ENV=dev` | **first-class `[profiles.X]`** |
 | Required vars | none | `required = true` | **`required = true` per profile** |
 | Redaction | none | `redact = true` | **`redact = true` by default for secrets** |
 | Secret plugins | none | none | **exec-based, 1Password/AWS/Vault/local** |
-| Script sandbox | none (RCE) | none | **WASM (wazero) — Phase 3** |
+| Script sandbox | none (RCE) | none | **WASM (wazero) — planned, not implemented** |
 | Shell hook overhead | ~5–15ms | ~5ms | **< 0.5ms (stat only) + lazy eval** |
 | Cross-platform (macOS/Linux) | ✅ | ✅ | **✅ single static binary (5 MB)** |
 | Homebrew distribution | ✅ homebrew-core | ✅ homebrew-core | **✅ custom tap, auto-publish via GoReleaser** |
@@ -47,8 +47,8 @@ brew install baken667/tap/envee
 # Go install (any platform)
 go install github.com/baken667/envee/cmd/envee@latest
 
-# Direct download — see https://github.com/baken667/envee/releases
-curl -fsSL https://envee.dev/install.sh | sh
+# Direct download: grab a prebuilt archive (with a Sigstore signature)
+# from https://github.com/baken667/envee/releases
 ```
 
 ### Wire up your shell
@@ -58,10 +58,15 @@ curl -fsSL https://envee.dev/install.sh | sh
 | bash | `echo 'eval "$(envee init bash)"' >> ~/.bashrc` |
 | zsh  | `echo 'eval "$(envee init zsh)"' >> ~/.zshrc` |
 | fish | `echo 'envee init fish \| source' >> ~/.config/fish/config.fish` |
-| nu   | `envee init nu \| save -f ~/.config/envee.nu; source ~/.config/envee.nu` |
-| pwsh | `envee init pwsh \| Out-String \| Invoke-Expression` |
+| nu   | *experimental* — `envee init nu \| save -f ~/.config/envee.nu; source ~/.config/envee.nu` |
+| pwsh | *experimental* — `envee init pwsh \| Out-String \| Invoke-Expression` |
 
 Restart your shell or `source` the config file.
+
+> **nu and pwsh are not usable yet.** Both hooks apply the environment in a
+> child scope — nushell runs `nu -c`, and the PowerShell hook is registered on
+> `OnIdle`, which executes in a separate runspace — so nothing reaches your
+> session. bash, zsh and fish work.
 
 ### Create your first `envee.toml`
 
@@ -136,9 +141,16 @@ Now every time you `cd` into this project, the env vars are automatically loaded
 | `envee check` | Static analysis of `envee.toml` |
 | `envee secret set/unset/list/get` | Manage the local `envee-plugin-env` store |
 | `envee doctor` | Health diagnostics |
-| `envee plugin list/info/install` | Manage plugins |
-| `envee daemon status/start/stop` | Manage the optional `enveed` daemon |
+| `envee plugin list/info` | Inspect discovered plugins |
+| `envee daemon status` | Check whether the optional `enveed` daemon is running |
 | `envee version` | Show envee version |
+
+Planned, and currently hidden from `--help` because they are not implemented:
+`envee plugin install`, `envee daemon start/stop`, `envee upgrade`,
+`envee debug`, `envee telemetry enable/disable`, `envee doctor --fix` and
+`envee trust --sign`. They exit non-zero rather than pretending to succeed.
+
+Error codes and exit codes are documented in [docs/errors.md](docs/errors.md).
 
 ## Plugins
 
@@ -160,27 +172,34 @@ Write your own plugin in 30 lines using [`pkg/sdk-go`](pkg/sdk-go/).
 
 ## Documentation
 
-- [PLAN.md](PLAN.md) — high-level competitive analysis
-- [ROADMAP.md](ROADMAP.md) — A/B/C implementation plan
+- [docs/errors.md](docs/errors.md) — every error code, what causes it, how to fix it
+- [PLAN.md](PLAN.md) — high-level competitive analysis (Russian)
+- [ROADMAP.md](ROADMAP.md) — A/B/C implementation plan (Russian)
 - [docs/adr/](docs/adr/) — 18 Architecture Decision Records
 - [examples/](examples/) — example projects
 
 ## Project status
 
-**Pre-1.0 / MVP complete.** All three planned milestones (eval, trust, plugins) are implemented and tested.
+**Pre-1.0.** The three planned milestones (eval, trust, plugins) are
+implemented. There is no published release yet.
+
+Packages with tests:
 
 ```
-8 packages with tests, all green:
-  internal/cli         (eval, resolve, status, trust, secret, init, ...)
+  internal/cli         (check, eval golden tests)
   internal/config      (TOML parser, profile flattening)
   internal/directive   (Apply orchestrator: file, path, profile, secret, template)
   internal/dotenv      (.env parser, hand-written state machine)
   internal/env         (Map type, diff, merge)
-  internal/plugin      (exec-based plugin dispatcher)
-  internal/shell       (bash/zsh/fish/nu/pwsh adapters, escape)
+  internal/resolver    (discovery, merge, trust source tracking)
+  internal/shell       (bash/zsh/fish/nu/pwsh adapters; escaping is round-tripped
+                        through real bash, zsh and fish)
   internal/template    (Jinja-lite, cycle detection)
-  internal/trust       (XDG_DATA_HOME store, summary, prompt)
+  internal/trust       (XDG_DATA_HOME store, summary)
 ```
+
+Not yet covered: `internal/plugin`, `internal/daemon`, `internal/errs`,
+`internal/log`, `internal/paths`, `pkg/sdk-go`.
 
 ## Development
 
@@ -194,11 +213,7 @@ make goreleaser-snapshot  # build full release artifacts locally (no publish)
 
 ## Contributing
 
-Contributions are welcome. Please:
-
-1. Read [docs/adr/](docs/adr/) — especially ADR-0015 (versioning) and ADR-0017 (error UX).
-2. Open an issue before significant changes.
-3. Follow conventional commits (`feat:`, `fix:`, `chore:`, etc.) — the changelog is auto-generated.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: [SECURITY.md](SECURITY.md).
 
 ## License
 
