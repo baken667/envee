@@ -78,9 +78,13 @@ archives:
     files:
       - README.md
       - LICENSE
-      - CHANGELOG.md
-      - completions/*
-      - manpages/*
+      # CHANGELOG.md, completions/* and manpages/* are not in the
+      # repo yet (no Cobra setup that auto-generates them, no
+      # hand-written manpages). Re-add once we wire up a
+      # before-hook that emits them from the cobra command tree.
+      # - CHANGELOG.md
+      # - completions/*
+      # - manpages/*
     format_overrides:
       - goos: windows
         format: zip
@@ -135,10 +139,15 @@ brews:
     install: |
       bin.install "envee"
       bin.install "enveed"
-      bash_completion.install "completions/envee.bash" => "envee"
-      zsh_completion.install "completions/envee.zsh" => "_envee"
-      fish_completion.install "completions/envee.fish"
-      man1.install Dir["manpages/*.1"]
+      # TODO: re-add shell completions and manpages once we wire up
+      # a before-hook that emits them (cobra root.CompletionOptions
+      # + a go-md2man-style generator). For now the binary ships
+      # without them — users can still drive envee by reading the
+      # help output (`envee --help`).
+      # bash_completion.install "completions/envee.bash" => "envee"
+      # zsh_completion.install "completions/envee.zsh" => "_envee"
+      # fish_completion.install "completions/envee.fish"
+      # man1.install Dir["manpages/*.1"]
       pkgshare.install "stdlib"
     test: |
       assert_match version.to_s, shell_output("#{bin}/envee --version")
