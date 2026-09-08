@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -158,6 +159,35 @@ func DiscoverPaths() []string { return discoverFromPath() }
 // PluginName extracts "foo" from "/path/to/envee-plugin-foo".
 func PluginName(path string) string { return pluginNameFromPath(path) }
 
+// isExecutable reports whether a directory entry can be run.
+//
+// Windows has no execute bit, so gating on mode&0o111 rejected every file
+// there and plugin discovery found nothing at all. Windows decides by
+// extension instead, via %PATHEXT%.
+func isExecutable(e os.DirEntry) bool {
+	if runtime.GOOS == "windows" {
+		ext := filepath.Ext(e.Name())
+		if ext == "" {
+			return false
+		}
+		pathext := os.Getenv("PATHEXT")
+		if pathext == "" {
+			pathext = ".COM;.EXE;.BAT;.CMD"
+		}
+		for _, candidate := range strings.Split(pathext, ";") {
+			if strings.EqualFold(strings.TrimSpace(candidate), ext) {
+				return true
+			}
+		}
+		return false
+	}
+	info, err := e.Info()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&0o111 != 0
+}
+
 func discoverFromPath() []string {
 	var found []string
 	pathDirs := filepath.SplitList(os.Getenv("PATH"))
@@ -174,11 +204,7 @@ func discoverFromPath() []string {
 			if !strings.HasPrefix(name, "envee-plugin-") {
 				continue
 			}
-			info, err := e.Info()
-			if err != nil {
-				continue
-			}
-			if info.Mode()&0o111 == 0 {
+			if !isExecutable(e) {
 				continue
 			}
 			found = append(found, filepath.Join(dir, name))
