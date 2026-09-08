@@ -100,7 +100,7 @@ brews:
       name: homebrew-tap-staging
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_STAGING_TOKEN }}"
-    homepage: "https://envee.bkn.wtf"
+    homepage: "https://github.com/baken667/envee"
     description: "Per-directory environment variable manager (pre-release)"
     license: "MIT"
     # NOTE: in goreleaser v1 `brews.ids` filters ARCHIVE ids, not build ids.
