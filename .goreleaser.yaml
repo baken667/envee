@@ -110,14 +110,16 @@ nfpms:
     section: utils
     priority: optional
     contents:
-      - src: ./completions/envee.bash
-        dst: /usr/share/bash-completion/completions/envee
-      - src: ./completions/envee.zsh
-        dst: /usr/share/zsh/vendor-completions/_envee
-      - src: ./completions/envee.fish
-        dst: /usr/share/fish/vendor_completions.d/envee.fish
-      - src: ./manpages/*.1
-        dst: /usr/share/man/man1
+      # TODO: re-add completions/manpages once we wire up a
+      # before-hook that emits them. See notes in archives.
+      # - src: ./completions/envee.bash
+      #   dst: /usr/share/bash-completion/completions/envee
+      # - src: ./completions/envee.zsh
+      #   dst: /usr/share/zsh/vendor-completions/_envee
+      # - src: ./completions/envee.fish
+      #   dst: /usr/share/fish/vendor_completions.d/envee.fish
+      # - src: ./manpages/*.1
+      #   dst: /usr/share/man/man1
 
 # Homebrew formula (pushed to baken667/homebrew-tap on release).
 # In v1.x, `repository:` is the tap (replaces deprecated `tap:`).
