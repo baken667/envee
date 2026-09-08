@@ -30,6 +30,30 @@ func isSensitive(key string) bool {
 	return false
 }
 
+// Redacted is the placeholder substituted for a sensitive value.
+const Redacted = "***REDACTED***"
+
+// redactAttr replaces the value of a sensitive attribute, and recurses into
+// groups so a secret nested under one is not missed.
+//
+// Redaction deliberately ignores the value's kind. It used to apply only to
+// slog.KindString, so a secret logged with slog.Any, slog.Int or a
+// fmt.Stringer reached the log in full.
+func redactAttr(a slog.Attr) slog.Attr {
+	if a.Value.Kind() == slog.KindGroup {
+		group := a.Value.Group()
+		out := make([]any, 0, len(group))
+		for _, g := range group {
+			out = append(out, redactAttr(g))
+		}
+		return slog.Group(a.Key, out...)
+	}
+	if isSensitive(a.Key) {
+		return slog.String(a.Key, Redacted)
+	}
+	return a
+}
+
 // Handle implements slog.Handler.
 func (h *redactingHandler) Handle(ctx context.Context, r slog.Record) error {
 	// Clone the record with redacted attributes.
@@ -40,10 +64,7 @@ func (h *redactingHandler) Handle(ctx context.Context, r slog.Record) error {
 		PC:      r.PC,
 	}
 	r.Attrs(func(a slog.Attr) bool {
-		if isSensitive(a.Key) && a.Value.Kind() == slog.KindString {
-			a.Value = slog.StringValue("***REDACTED***")
-		}
-		clone.AddAttrs(a)
+		clone.AddAttrs(redactAttr(a))
 		return true
 	})
 	return h.Handler.Handle(ctx, clone)
@@ -53,11 +74,7 @@ func (h *redactingHandler) Handle(ctx context.Context, r slog.Record) error {
 func (h *redactingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	redacted := make([]slog.Attr, len(attrs))
 	for i, a := range attrs {
-		if isSensitive(a.Key) && a.Value.Kind() == slog.KindString {
-			redacted[i] = slog.String(a.Key, "***REDACTED***")
-		} else {
-			redacted[i] = a
-		}
+		redacted[i] = redactAttr(a)
 	}
 	return &redactingHandler{Handler: h.Handler.WithAttrs(redacted)}
 }

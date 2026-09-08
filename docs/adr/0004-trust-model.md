@@ -198,3 +198,29 @@ Expired trust → файл снова blocked, требует re-trust.
 
 - Trust-store в plain JSON в MVP; encryption в v2.
 - Canonical hash через `BurntSushi/toml` re-marshal — не 100% гарантия стабильности через major versions (мониторим).
+
+## Примечание по платформам (2026-09)
+
+Разделение «trust-store в `$XDG_DATA_HOME`, а не в `$XDG_CONFIG_HOME`»
+работает **только на Linux**. На macOS `adrg/xdg` отображает и `ConfigHome`, и
+`DataHome`, и `RuntimeDir` в один и тот же каталог:
+
+```
+ConfigHome: ~/Library/Application Support
+DataHome:   ~/Library/Application Support
+RuntimeDir: ~/Library/Application Support
+```
+
+То есть на macOS `paths.Config()` и `paths.Data()` — это буквально один
+каталог `~/Library/Application Support/envee`, и trust-store лежит внутри него.
+Заявленной в этом ADR изоляции от синхронизации на macOS нет.
+
+Практически это менее опасно, чем звучит: `~/Library/Application Support` не
+синхронизируется iCloud Drive по умолчанию (iCloud Drive берёт `~/Documents` и
+`~/Desktop`), а Dropbox/syncthing синхронизируют то, что им явно указали.
+Но полагаться на путь как на гарантию нельзя.
+
+Инвариант проверяется тестом `TestTrustStoreIsNotUnderConfig`
+(`internal/paths/paths_test.go`), который пропускается там, где платформа не
+различает эти каталоги. Если изоляция понадобится и на macOS, её придётся
+задавать явным путём, а не через XDG-обёртку.
