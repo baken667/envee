@@ -103,6 +103,13 @@ the curated view.
   Homebrew can run it.
 - Dependencies: cobra 1.8.1 → 1.10.2, BurntSushi/toml 1.5.0 → 1.6.0.
 
+### Verified
+
+The release pipeline was rehearsed end to end through `v0.1.1-rc.1` and the
+staging tap before the first stable tag: GitHub release created, archives and
+checksums published, formula pushed to the tap, `brew install` and `brew test`
+green, and completions and man pages installed to the right prefixes.
+
 ### Known issues
 
 - The nushell and PowerShell hooks apply the environment in a child scope and
