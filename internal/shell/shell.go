@@ -8,7 +8,9 @@
 package shell
 
 import (
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -320,15 +322,36 @@ type NuAdapter struct{}
 func (NuAdapter) Name() Name { return Nu }
 
 // Init implements Adapter.
+//
+// Nushell has no `eval`, so it cannot execute a block of generated statements
+// in the caller's scope the way bash and zsh do. Two mechanisms make this
+// work instead, both verified against nushell 0.115:
+//
+//   - `def --env` marks a command as able to mutate its caller's environment.
+//     Both load-env and hide-env propagate out of one.
+//   - An env_change hook given as a STRING is parsed and evaluated in the
+//     caller's scope. A closure is not: env changes made inside one, including
+//     via a `def --env` command called from it, stop at the closure boundary.
+//
+// So the hook body is a `def --env` command, and the registration is the
+// string form that calls it. `envee eval nu` emits JSON rather than nushell
+// statements, because a record is what load-env consumes.
 func (NuAdapter) Init(selfPath string) string {
 	return renderInitTemplate(`# envee shell hook for nushell
-$env.ENVEE_HOOK = {|
-  let out = (^"{{.SelfPath}}" --quiet eval nu | complete)
-  if $out.exit_code == 0 and ($out.stdout | str length) > 0 {
-    nu -c $out.stdout
-  }
+#
+# _envee_hook must be `+"`def --env`"+`: that is what lets load-env and hide-env
+# inside it affect your session. The hook below is registered as a string, not
+# a closure, for the same reason -- a closure would swallow the changes.
+def --env _envee_hook [] {
+  let r = (^"{{.SelfPath}}" --quiet eval nu | complete)
+  if $r.exit_code != 0 { return }
+  if ($r.stdout | str trim | is-empty) { return }
+  let d = ($r.stdout | from json)
+  for k in $d.unset { hide-env --ignore-errors $k }
+  $d.set | load-env
 }
-$env.config = ($env.config | upsert hooks.env_change.PWD {|| $env.ENVEE_HOOK })
+
+$env.config = ($env.config | upsert hooks.env_change.PWD [ "_envee_hook" ])
 `, selfPath)
 }
 
@@ -389,6 +412,44 @@ func NuEscape(s string) string {
 	return b.String()
 }
 
+// DiffRenderer is an optional Adapter capability for shells that cannot
+// evaluate a sequence of generated statements in the caller's scope.
+//
+// An adapter implementing it takes over rendering of the whole env diff, and
+// Export/Unset/SetPath are not used for that shell.
+type DiffRenderer interface {
+	// RenderDiff returns the payload the shell hook consumes. set holds the
+	// variables to define (including PATH when it changed), unset the ones to
+	// remove.
+	RenderDiff(set map[string]string, unset []string) string
+}
+
+// nuPayload is the JSON `envee eval nu` produces.
+type nuPayload struct {
+	Set   map[string]string `json:"set"`
+	Unset []string          `json:"unset"`
+}
+
+// RenderDiff implements DiffRenderer.
+//
+// Nushell has no eval, so it gets a JSON record the hook feeds to load-env and
+// hide-env instead of a script it cannot run.
+func (NuAdapter) RenderDiff(set map[string]string, unset []string) string {
+	if set == nil {
+		set = map[string]string{}
+	}
+	if unset == nil {
+		unset = []string{}
+	}
+	sort.Strings(unset)
+	out, err := json.Marshal(nuPayload{Set: set, Unset: unset})
+	if err != nil {
+		// The input is a plain map of strings; marshalling it cannot fail.
+		return ""
+	}
+	return string(out) + "\n"
+}
+
 // ---- pwsh (PowerShell) adapter ---------------------------------------------
 
 // PwshAdapter implements Adapter for PowerShell.
@@ -398,20 +459,30 @@ type PwshAdapter struct{}
 func (PwshAdapter) Name() Name { return Pwsh }
 
 // Init implements Adapter.
+//
+// The hook wraps the prompt function rather than registering an OnIdle engine
+// event. Verified against PowerShell 7.6: an OnIdle -Action scriptblock runs
+// in its own runspace and its $env: assignments never reach the session, while
+// a prompt-function wrapper runs in the session and they do.
 func (PwshAdapter) Init(selfPath string) string {
 	return renderInitTemplate(`# envee shell hook for PowerShell
-function _envee_hook {
-  $previous = $?
+#
+# Wrapping prompt is deliberate. Register-EngineEvent -SourceIdentifier
+# PowerShell.OnIdle runs its -Action in a separate runspace, so the $env:
+# assignments made there never reach your session.
+function global:_envee_hook {
   $out = & "{{.SelfPath}}" --quiet eval pwsh 2>$null
   if ($LASTEXITCODE -eq 0 -and $out) {
-    Invoke-Expression $out
+    Invoke-Expression ($out -join "`+"`"+`n")
   }
 }
 
-# Trigger on prompt
-if (-not (Get-Variable -Name _envee_registered -Scope Global -ErrorAction SilentlyContinue)) {
-  $global:_envee_registered = $true
-  Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -Action { _envee_hook } | Out-Null
+if (-not (Test-Path variable:global:_envee_original_prompt)) {
+  $global:_envee_original_prompt = $function:prompt
+  function global:prompt {
+    _envee_hook
+    & $global:_envee_original_prompt
+  }
 }
 `, selfPath)
 }

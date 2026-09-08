@@ -129,6 +129,27 @@ func renderShellDiff(adapter shell.Adapter, result *directive.Result, osEnv map[
 	// Compute diff of env values, but skip PATH (handled separately).
 	ops := computeDiff(result.Env, currentMap, newPath)
 
+	// Shells that cannot evaluate generated statements in the caller's scope
+	// render the whole diff themselves (nushell gets JSON for load-env).
+	if renderer, ok := adapter.(shell.DiffRenderer); ok {
+		set := make(map[string]string)
+		var unset []string
+		if newPath != currentPath {
+			set["PATH"] = newPath
+		}
+		for _, op := range ops {
+			if op.Key == "PATH" {
+				continue
+			}
+			if op.Set {
+				set[op.Key] = op.Value
+			} else {
+				unset = append(unset, op.Key)
+			}
+		}
+		return renderer.RenderDiff(set, unset)
+	}
+
 	// Build shell output.
 	var out string
 	// PATH first.
