@@ -150,7 +150,9 @@ func releaseLock(l *lockFile) {
 	if l == nil || l.f == nil {
 		return
 	}
+	// Best-effort cleanup: these calls can fail (e.g. the lock file is
+	// already gone) but there is nothing actionable for the caller.
 	flockUnlock(l.f)
-	l.f.Close()
-	os.Remove(l.path)
+	_ = l.f.Close()
+	_ = os.Remove(l.path)
 }

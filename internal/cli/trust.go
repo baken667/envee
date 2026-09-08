@@ -82,9 +82,9 @@ func runTrust(cmd *cobra.Command, args []string, sign bool, keyPath, ttlStr stri
 	// Handle --remove.
 	if remove {
 		// Load the file to get its hash, then revoke.
-		cfg, err := config.Parse(target)
-		if err != nil {
-			return err
+		cfg, parseErr := config.Parse(target)
+		if parseErr != nil {
+			return parseErr
 		}
 		if revErr := store.Revoke(cfg.FileHash); revErr != nil {
 			return revErr
