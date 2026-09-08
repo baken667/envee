@@ -138,15 +138,24 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Install nushell
-        # The generated nushell hook shipped as a syntax error once
-        # (five parse errors, so `envee init nu` produced something that could
-        # not be sourced at all). internal/shell's parse check catches exactly
-        # that, but nushell is not on the runner image, so without this step
-        # the test silently skips and the gap reopens.
+      - name: Install nushell and fish
+        # Both hooks shipped broken, and in both cases the shell was missing
+        # from the runner so the test that would have caught it skipped:
         #
-        # PowerShell needs no step: it is preinstalled on ubuntu-latest.
+        #   nushell - the generated hook was a syntax error, five parse errors,
+        #             so `envee init nu` produced something unsourceable.
+        #   fish    - command substitution splits output into a list and eval
+        #             joins it with spaces, so the hook set only the first
+        #             variable and swallowed the rest into its value.
+        #
+        # A skipped test is indistinguishable from a passing one in the summary,
+        # which is how both reached a release. Install the shells here and fail
+        # below if any is absent.
+        #
+        # bash, zsh and PowerShell need no step: all three are preinstalled.
         run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq fish
+          fish --version
           version=0.115.1
           curl -sSfL -o /tmp/nu.tar.gz \
             "https://github.com/nushell/nushell/releases/download/${version}/nu-${version}-x86_64-unknown-linux-gnu.tar.gz"
@@ -154,12 +163,14 @@ jobs:
           sudo install "/tmp/nu-${version}-x86_64-unknown-linux-gnu/nu" /usr/local/bin/nu
           nu --version
 
-      - name: Verify the generated hooks parse
-        # Fails rather than skips if either shell went missing.
+      - name: Verify the generated hooks parse and apply the environment
+        # Fails rather than skips if any shell went missing -- a skipped hook
+        # test looks exactly like a passing one.
         run: |
-          command -v nu >/dev/null   || { echo "nu not installed"; exit 1; }
-          command -v pwsh >/dev/null || { echo "pwsh not installed"; exit 1; }
-          go test ./internal/shell/ -run 'TestNuInit|TestPwshInit' -v
+          for sh in bash zsh fish nu pwsh; do
+            command -v "$sh" >/dev/null || { echo "$sh is not installed; the hook tests would silently skip"; exit 1; }
+          done
+          go test ./internal/shell/ -run 'TestNuInit|TestPwshInit|TestHookApplies|TestFishHook' -v
 
   # ---- Lint -----------------------------------------------------------------
 
