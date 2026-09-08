@@ -183,11 +183,14 @@ signs:
       - ${artifact}
 
 # SBOM (CycloneDX) for supply-chain transparency.
-sboms:
-  - id: source-sbom
-    artifacts: source
-  - id: binary-sbom
-    artifacts: binary
+# Disabled for v0.1.0 because the goreleaser-action runner doesn't
+# have `syft` installed. Will be re-enabled in a follow-up that also
+# installs syft in the release workflow.
+# sboms:
+#   - id: source-sbom
+#     artifacts: source
+#   - id: binary-sbom
+#     artifacts: binary
 
 # Docker image (multi-arch). v1.x uses dockers + docker_manifests.
 dockers:
