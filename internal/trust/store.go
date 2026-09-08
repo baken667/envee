@@ -120,7 +120,14 @@ func (s *Store) Status(filePath, hash string) (Status, error) {
 //
 // TTL of zero means "never expires". Use a positive duration for time-bounded trust.
 func (s *Store) Trust(filePath, hash string, ttl time.Duration) error {
-	entry := Entry{
+	return s.Put(s.NewEntry(filePath, hash, ttl))
+}
+
+// NewEntry builds an unsigned trust entry without storing it. Callers that
+// need to sign one do so between building and storing, since the signature
+// covers the finished entry.
+func (s *Store) NewEntry(filePath, hash string, ttl time.Duration) Entry {
+	e := Entry{
 		Version:     1,
 		FileHash:    hash,
 		FilePath:    filePath,
@@ -129,12 +136,34 @@ func (s *Store) Trust(filePath, hash string, ttl time.Duration) error {
 		ToolVersion: version.Version,
 	}
 	if ttl > 0 {
-		entry.ExpiresAt = s.now().Add(ttl)
+		e.ExpiresAt = s.now().Add(ttl)
 	}
-	if err := s.Undeny(filePath); err != nil {
+	return e
+}
+
+// Put stores a trust entry, clearing any deny for the same path.
+func (s *Store) Put(e Entry) error {
+	if err := s.Undeny(e.FilePath); err != nil {
 		return err
 	}
-	return s.writeEntry(hash, entry)
+	return s.writeEntry(e.FileHash, e)
+}
+
+// Get returns the stored entry for a hash. The boolean reports whether one
+// exists; a missing entry is not an error.
+func (s *Store) Get(hash string) (Entry, bool, error) {
+	data, err := os.ReadFile(s.entryPath(hash))
+	if os.IsNotExist(err) {
+		return Entry{}, false, nil
+	}
+	if err != nil {
+		return Entry{}, false, err
+	}
+	var e Entry
+	if err := json.Unmarshal(data, &e); err != nil {
+		return Entry{}, false, fmt.Errorf("parse trust entry for %s: %w", hash, err)
+	}
+	return e, true, nil
 }
 
 // isDenied reports whether filePath has an explicit deny entry.

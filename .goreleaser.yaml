@@ -198,15 +198,17 @@ signs:
       - --output-certificate=${certificate}
       - ${artifact}
 
-# SBOM (CycloneDX) for supply-chain transparency.
-# Disabled for v0.1.0 because the goreleaser-action runner doesn't
-# have `syft` installed. Will be re-enabled in a follow-up that also
-# installs syft in the release workflow.
-# sboms:
-#   - id: source-sbom
-#     artifacts: source
-#   - id: binary-sbom
-#     artifacts: binary
+# SBOM for supply-chain transparency.
+#
+# One SBOM per release archive, so a consumer can inspect exactly what is in
+# the artefact they downloaded. syft is installed by the release workflow;
+# `goreleaser check` does not verify that it exists, so the CI snapshot build
+# is what actually proves this works.
+sboms:
+  - id: archive-sbom
+    artifacts: archive
+    documents:
+      - "${artifact}.sbom.json"
 
 # Docker images are not built for now: envee is a shell-hook tool that reads
 # envee.toml from the host cwd and mutates the host shell's environment, so a

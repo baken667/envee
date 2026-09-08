@@ -40,6 +40,12 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
+      - name: Install syft
+        # goreleaser shells out to syft for the per-archive SBOMs. `goreleaser
+        # check` does not verify that it exists, so a missing syft would only
+        # surface as a failed release.
+        uses: anchore/sbom-action/download-syft@v0
+
       - name: Run GoReleaser
         # v5 of the action installs GoReleaser v1.x, which matches the v1
         # schema in .goreleaser.yaml. The v6 action (GoReleaser v2.x) would

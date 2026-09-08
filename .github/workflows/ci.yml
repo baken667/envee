@@ -257,6 +257,11 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - name: Install syft
+        # The snapshot below builds SBOMs, same as the real release. Without
+        # this the PR check would stop covering that step.
+        uses: anchore/sbom-action/download-syft@v0
+
       - name: Install GoReleaser (v1.x)
         # Pinned to the same version the release workflow resolves to, so this
         # job actually validates what will ship. v1.26.2 is the last v1
