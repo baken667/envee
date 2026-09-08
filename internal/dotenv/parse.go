@@ -67,6 +67,14 @@ const (
 func parse(data string, expand bool) (map[string]string, error) {
 	out := make(map[string]string)
 
+	// Normalise CRLF before the state machine runs. It only recognises '\n' as
+	// a line terminator, so on a file checked out with Windows line endings the
+	// '\r' fell through as ordinary content: every value gained a trailing
+	// carriage return, and each blank line produced a variable literally named
+	// "\r". The `\r` ESCAPE inside a double-quoted value is handled separately
+	// and is unaffected by this.
+	data = strings.ReplaceAll(data, "\r\n", "\n")
+
 	var (
 		st            = stateStart
 		key           strings.Builder
@@ -109,10 +117,18 @@ func parse(data string, expand bool) (map[string]string, error) {
 				continue
 			}
 			// Export prefix.
-			if (st == stateStart) && i+6 < len(data) && data[i:i+6] == "export" &&
+			if (st == stateStart) && i+6 <= len(data) && data[i:i+6] == "export" &&
 				(i+6 == len(data) || data[i+6] == ' ' || data[i+6] == '\t') {
 				// Find first non-space char after "export".
-				j := 6 // "export" is positions 0..5, so 6 is right after
+				//
+				// This offset must be relative to i. It used to be the literal
+				// 6, which is only correct when "export" starts at the very
+				// beginning of the file. Anywhere else, `i = j - 1` below sent
+				// i BACKWARDS to 5 and the scanner restarted from there: any
+				// .env whose first `export` line was not the first line of the
+				// file made the parser loop forever, hanging the shell hook on
+				// every prompt.
+				j := i + 6
 				for j < len(data) && (data[j] == ' ' || data[j] == '\t') {
 					j++
 				}
