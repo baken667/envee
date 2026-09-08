@@ -17,15 +17,15 @@ project_name: envee
 # fighting goreleaser's template expansion on the env var.
 before:
   hooks:
-    - cmd: |
-        if [ -n "$COSIGN_KEY" ]; then
-          echo "Writing cosign key to /tmp/cosign.key"
-          echo -n "$COSIGN_KEY" | base64 -d > /tmp/cosign.key
-          chmod 600 /tmp/cosign.key
-        fi
-        if [ -n "$COSIGN_PASSWORD" ]; then
-          echo "Using COSIGN_PASSWORD from env"
-        fi
+    - |
+      if [ -n "$COSIGN_KEY" ]; then
+        echo "Writing cosign key to /tmp/cosign.key"
+        echo -n "$COSIGN_KEY" | base64 -d > /tmp/cosign.key
+        chmod 600 /tmp/cosign.key
+      fi
+      if [ -n "$COSIGN_PASSWORD" ]; then
+        echo "Using COSIGN_PASSWORD from env"
+      fi
 
 # Primary "core" binary.
 builds:
