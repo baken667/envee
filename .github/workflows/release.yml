@@ -12,13 +12,18 @@ on:
         default: "false"
 
 permissions:
-  contents: write   # create releases
-  packages: write   # push to ghcr.io
-  id-token: write   # for cosign OIDC
+  contents: write # create releases
+  id-token: write # keyless cosign signing via Sigstore/Fulcio
 
 jobs:
   release:
     name: Build, sign, and publish
+    # A tag like v0.1.1-rc.1 matches this workflow's `v*` filter AND
+    # release-staging.yml's `v*-rc.*` filter, so both would run: two jobs
+    # racing to create the same GitHub release, with the pre-release pushed
+    # to the production tap. GitHub tag filters cannot express negation, so
+    # the exclusion has to live here.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -35,30 +40,23 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
-      - name: Install Docker buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Registry
-        if: env.SNAPSHOT != 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Run GoReleaser
-        # v5 of the action installs GoReleaser v1.x, which matches the
-        # v1.x schema in .goreleaser.yaml. Upgrading to the v6 action
-        # would force a migration to homebrew_casks (cask DSL) — see
-        # docs/adr/0014-homebrew-distribution.md for why we stick with
-        # the formula DSL.
+        # v5 of the action installs GoReleaser v1.x, which matches the v1
+        # schema in .goreleaser.yaml. The v6 action (GoReleaser v2.x) would
+        # force a migration to homebrew_casks — see
+        # docs/adr/0014-homebrew-distribution.md.
+        #
+        # Pinned to the same version ci.yml installs for `goreleaser check`,
+        # so the PR check and the release cannot drift apart.
         uses: goreleaser/goreleaser-action@v5
         with:
-          version: latest
-          args: release --clean
+          version: "~> v1.26"
+          args: >-
+            ${{ inputs.snapshot == 'true'
+                && 'release --snapshot --clean --skip=sign,publish,announce'
+                || 'release --clean' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          COSIGN_KEY: ${{ secrets.COSIGN_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-          SNAPSHOT: ${{ inputs.snapshot || 'false' }}
+          # No COSIGN_KEY / COSIGN_PASSWORD: signing is keyless and uses the
+          # OIDC token granted by `id-token: write` above.

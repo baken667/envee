@@ -52,7 +52,7 @@ type Response struct {
 
 // Value is the resolved value from a plugin.
 type Value struct {
-	Type  string `json:"type"`  // "string" | "int" | "bool" | "json"
+	Type  string `json:"type"` // "string" | "int" | "bool" | "json"
 	Value any    `json:"value"`
 }
 

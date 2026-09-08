@@ -142,8 +142,8 @@ func parseTOMLFile(data []byte) (map[string]string, error) {
 // flatten converts a nested map[string]any into a flat map[string]string
 // using dot-notation for nested keys.
 //
-//   {"app": {"name": "x"}} → {"app.name": "x"}
-//   {"items": [1, 2, 3]}   → {"items": "[1 2 3]"}  (best effort)
+//	{"app": {"name": "x"}} → {"app.name": "x"}
+//	{"items": [1, 2, 3]}   → {"items": "[1 2 3]"}  (best effort)
 func flatten(in map[string]any) map[string]string {
 	out := make(map[string]string)
 	flattenInto(out, "", in)

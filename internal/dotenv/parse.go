@@ -68,7 +68,7 @@ func parse(data string, expand bool) (map[string]string, error) {
 	out := make(map[string]string)
 
 	var (
-		st            state = stateStart
+		st            = stateStart
 		key           strings.Builder
 		value         strings.Builder
 		curLine       = 1

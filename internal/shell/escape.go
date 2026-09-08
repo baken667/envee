@@ -12,13 +12,13 @@ import (
 // BashEscape returns a string safe to use as a bash token (unquoted context).
 //
 // Strategy:
-//   - Empty string → '' (literal empty).
+//   - Empty string → ” (literal empty).
 //   - String contains only safe characters (alphanumeric, dot, slash, dash,
 //     underscore, colon, equals, comma, plus) → return as-is.
 //   - String contains control characters (newline, tab, etc.) or non-ASCII →
 //     use ANSI-C $'...' quoting.
 //   - Otherwise (contains shell metacharacters) → wrap in single quotes and
-//     escape inner single quotes via the canonical '\'' sequence.
+//     escape inner single quotes via the canonical '\” sequence.
 func BashEscape(s string) string {
 	if s == "" {
 		return "''"

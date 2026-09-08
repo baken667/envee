@@ -12,23 +12,35 @@ permissions:
 
 env:
   GO_VERSION: "1.24"
+  GORELEASER_VERSION: "v1.26.2"
 
 jobs:
   # ---- Test matrix ----------------------------------------------------------
 
   test:
-    name: Test (${{ matrix.os }} / ${{ matrix.arch }})
+    name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # The race branch below is POSIX shell; windows-latest defaults to
+        # pwsh, which would not understand it.
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        arch: [amd64, arm64]
+        # Architecture comes from the runner, not from a matrix variable:
+        # ubuntu-latest is linux/amd64 and macos-latest is darwin/arm64.
+        # The previous `arch: [amd64, arm64]` dimension was never consumed and
+        # simply ran every configuration twice. Real cross-architecture
+        # coverage lives in the cross-compile job below.
+        os: [ubuntu-latest, macos-latest, windows-latest]
         include:
-          # Run with race detector on one combo only (it's slow)
+          # The race detector is slow; one representative platform is enough.
           - os: ubuntu-latest
-            arch: amd64
             race: true
+    # envee ships a windows binary that has never been tested. Land the job
+    # non-blocking, fix what it finds, then make it required.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,10 +66,50 @@ jobs:
         if: matrix.race
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-${{ matrix.os }}-${{ matrix.arch }}
+          name: coverage-${{ matrix.os }}
           path: coverage.out
 
-  # ---- Lint ----------------------------------------------------------------
+  # ---- Cross-compilation ----------------------------------------------------
+
+  cross-compile:
+    name: Cross-compile (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Mirrors the builds: matrix in .goreleaser.yaml, including the
+        # windows/arm64 ignore and the fact that enveed is linux+darwin only.
+        # A divergence here is a divergence in the release.
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    env:
+      CGO_ENABLED: "0"
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build envee
+        run: go build -trimpath -o /dev/null ./cmd/envee
+
+      - name: Build enveed
+        if: matrix.goos != 'windows'
+        run: go build -trimpath -o /dev/null ./cmd/enveed
+
+      - name: Vet
+        # Per-GOOS vet type-checks the build-tag-excluded files (the flock
+        # helpers) that a host-only build never compiles.
+        run: go vet ./...
+
+  # ---- Lint -----------------------------------------------------------------
 
   lint:
     name: Lint
@@ -67,11 +119,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache: true
+          # The lint action manages its own cache; enabling both makes them
+          # fight over the same keys.
+          cache: false
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          # v8 requires golangci-lint v2, which is what .golangci.yml targets.
+          # Pinned to a minor so a new upstream check cannot turn main red
+          # without a commit here.
+          version: v2.1
           args: --timeout=5m
 
   # ---- Smoke test of built binary ------------------------------------------
@@ -96,7 +153,8 @@ jobs:
             -o ./bin/enveed ./cmd/enveed
 
       - name: Smoke version
-        run: ./bin/envee --version
+        run: |
+          ./bin/envee --version | grep -q "ci" || (echo "ldflags did not reach the binary"; exit 1)
 
       - name: Smoke help
         run: ./bin/envee --help
@@ -117,10 +175,32 @@ jobs:
           out=$(./bin/envee init fish)
           echo "$out" | grep -q "function _envee_hook" || (echo "missing fish hook"; exit 1)
 
-      - name: Smoke discover config
+      - name: Smoke check
+        run: ./bin/envee check examples/basic/envee.toml
+
+      - name: Untrusted eval must be refused
+        # The whole point of the trust model. Exit code 3 is "trust required"
+        # per docs/adr/0017-error-ux.md.
         working-directory: ./examples/basic
         run: |
-          ../../bin/envee --config envee.toml check || true
+          set +e
+          ../../bin/envee eval bash >/dev/null 2>&1
+          code=$?
+          set -e
+          if [ "$code" -ne 3 ]; then
+            echo "eval of an untrusted config exited $code, expected 3"
+            exit 1
+          fi
+
+      - name: Trusted eval exports the expected variables
+        working-directory: ./examples/basic
+        run: |
+          ../../bin/envee trust --yes
+          out=$(../../bin/envee eval bash)
+          echo "$out" | grep -q "SERVICE_NAME" || (echo "missing SERVICE_NAME"; exit 1)
+          # Values must survive a real shell round trip without executing.
+          eval "$out"
+          [ "$SERVICE_NAME" = "myapp" ] || (echo "SERVICE_NAME=$SERVICE_NAME"; exit 1)
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4
@@ -135,18 +215,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # goreleaser needs history for the changelog
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
       - name: Install GoReleaser (v1.x)
-        # The legacy git.io/goreleaser install script was updated and no
-        # longer accepts `-b /usr/local/bin`. We now download the v1.26.2
-        # tarball directly and put it on PATH. v1.26.2 is the last v1
-        # release, matching the v1.x schema in .goreleaser.yaml.
+        # Pinned to the same version the release workflow resolves to, so this
+        # job actually validates what will ship. v1.26.2 is the last v1
+        # release and matches the v1 schema in the goreleaser configs.
         run: |
           curl -sSfL -o /tmp/gr.tar.gz \
-            "https://github.com/goreleaser/goreleaser/releases/download/v1.26.2/goreleaser_Linux_x86_64.tar.gz"
+            "https://github.com/goreleaser/goreleaser/releases/download/${GORELEASER_VERSION}/goreleaser_Linux_x86_64.tar.gz"
           tar -xzf /tmp/gr.tar.gz -C /tmp
           sudo mv /tmp/goreleaser /usr/local/bin/goreleaser
           goreleaser --version
+
       - name: Check (main)
         run: goreleaser check --config .goreleaser.yaml
+
       - name: Check (staging)
         run: goreleaser check --config .goreleaser.staging.yaml
+
+      - name: Snapshot build (main config)
+        # `goreleaser check` validates the schema only. It does not resolve
+        # archives.files globs, run nfpm, or render the Homebrew formula --
+        # which is why fifteen consecutive release runs failed on things a
+        # snapshot would have caught in ninety seconds on a PR.
+        #
+        # --skip=sign because keyless cosign needs the release workflow's
+        # OIDC token, which a PR job does not have.
+        run: goreleaser release --snapshot --clean --skip=sign,publish,announce
+
+      - name: Show the generated Homebrew formula
+        # This is the file that gets force-pushed to the tap. Make it visible
+        # in PR logs before it lands there.
+        run: cat dist/homebrew/Formula/envee.rb || true
