@@ -187,8 +187,13 @@ signs:
     artifacts: checksum
     signature: "${artifact}.sig"
     output: true
+    # Pass the cosign password as a plain env var (no template
+    # expansion). goreleaser v1.x's .Env map doesn't reliably see
+    # values that come from the GitHub Actions env: block, so we
+    # rely on the cmd inheriting the parent's env directly via
+    # the plain `key=value` syntax below.
     env:
-      - COSIGN_PASSWORD={{ .Env.COSIGN_PASSWORD }}
+      - COSIGN_PASSWORD
     args:
       - sign-blob
       - --key=file:///tmp/cosign.key
