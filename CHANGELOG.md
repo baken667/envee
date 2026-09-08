@@ -9,6 +9,8 @@ the curated view.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-09-08
+
 ### Fixed
 
 - **The fish shell hook set only the first variable.** Command substitution in
@@ -199,7 +201,8 @@ green, and completions and man pages installed to the right prefixes.
 - `envee trust --sign` (ed25519) is not implemented.
 - The WASM script sandbox (`_.script`) is not implemented.
 
-[Unreleased]: https://github.com/baken667/envee/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/baken667/envee/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/baken667/envee/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/baken667/envee/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/baken667/envee/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/baken667/envee/releases/tag/v0.1.1
