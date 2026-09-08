@@ -68,6 +68,11 @@ archives:
     builds:
       - envee
       - enveed
+    # The enveed daemon is not built for windows (Linux/macOS only
+    # for now — see docs/adr/0003-naming.md / 0012-cross-platform.md).
+    # Without this flag, goreleaser refuses to package archives that
+    # have a different number of binaries per platform.
+    allow_different_binary_count: true
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format: tar.gz
     files:
