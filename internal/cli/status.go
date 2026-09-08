@@ -13,7 +13,6 @@ import (
 	"github.com/baken667/envee/internal/directive"
 	"github.com/baken667/envee/internal/errs"
 	"github.com/baken667/envee/internal/paths"
-	"github.com/baken667/envee/internal/plugin"
 	"github.com/baken667/envee/internal/resolver"
 	"github.com/baken667/envee/internal/trust"
 )
@@ -119,7 +118,7 @@ func runStatus(cmd *cobra.Command, opts statusOptions) error {
 	// that once every contributing file is trusted.
 	var result *directive.Result
 	if cfg != nil && len(out.Untrusted) == 0 {
-		dispatcher, _ := plugin.DiscoverAndLoad(cmd.Context())
+		dispatcher := dispatcherFor(cmd.Context(), cfg)
 		result, _ = directive.Apply(cmd.Context(), cfg, directive.ApplyOptions{
 			ConfigRoot: filepath.Dir(cfg.Path),
 			Profile:    profile,
