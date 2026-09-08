@@ -12,6 +12,21 @@ version: 1
 
 project_name: envee
 
+# before-hook: decode the base64-encoded COSIGN_KEY secret and write
+# it to a file so the signs step can use --key=file://... instead of
+# fighting goreleaser's template expansion on the env var.
+before:
+  hooks:
+    - cmd: |
+        if [ -n "$COSIGN_KEY" ]; then
+          echo "Writing cosign key to /tmp/cosign.key"
+          echo -n "$COSIGN_KEY" | base64 -d > /tmp/cosign.key
+          chmod 600 /tmp/cosign.key
+        fi
+        if [ -n "$COSIGN_PASSWORD" ]; then
+          echo "Using COSIGN_PASSWORD from env"
+        fi
+
 # Primary "core" binary.
 builds:
   - id: envee
@@ -167,18 +182,21 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
-# Cosign signatures. v1.x has no `key:` field on Sign — the key is
-# passed via env. The `output:` field is a bool here.
+# Cosign signatures. The key is decoded from the COSIGN_KEY env var
+# (base64) to /tmp/cosign.key by the before-hook above, then passed
+# to cosign via --key=file://... to avoid the env template quirk
+# in goreleaser v1.x (where {{ .Env.X }} fails if the env var is
+# only available at process scope, not via the goreleaser context).
 signs:
   - cmd: cosign
     artifacts: checksum
     signature: "${artifact}.sig"
     output: true
     env:
-      - COSIGN_KEY={{ .Env.COSIGN_KEY }}
+      - COSIGN_PASSWORD={{ .Env.COSIGN_PASSWORD }}
     args:
       - sign-blob
-      - --key=env://COSIGN_KEY
+      - --key=file:///tmp/cosign.key
       - --output-signature=${signature}
       - ${artifact}
 
