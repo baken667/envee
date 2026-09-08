@@ -67,8 +67,8 @@ func runEval(cmd *cobra.Command, shellName string) error {
 	// 3. Trust gate (skip if ENVEE_BYPASS_TRUST=1, for tests/CI).
 	if os.Getenv("ENVEE_BYPASS_TRUST") != "1" {
 		store := trust.NewStore()
-		if err := store.CheckFile(cfg.Path, cfg.FileHash); err != nil {
-			return errs.Trust(cfg.Path, cfg.FileHash).WithCause(err)
+		if trustErr := store.CheckFile(cfg.Path, cfg.FileHash); trustErr != nil {
+			return errs.Trust(cfg.Path, cfg.FileHash).WithCause(trustErr)
 		}
 	}
 

@@ -9,20 +9,23 @@ import (
 )
 
 // Summary is a human-readable description of what trusting a config file enables.
+//
+// Field order is dictated by govet's fieldalignment check: slices first
+// (24 B), then strings (16 B), then int (8 B).
 type Summary struct {
-	Path         string
-	Hash         string
-	Schema       string
-	Profile      string
 	EnvVars      []string
 	RedactedVars []string
 	PathAdds     []string
 	Files        []string
-	Scripts      int
 	Secrets      []string
 	Watches      []string
 	Warnings     []string
 	Errors       []string
+	Path         string
+	Hash         string
+	Schema       string
+	Profile      string
+	Scripts      int
 }
 
 // BuildSummary generates a Summary from a config.

@@ -1,0 +1,88 @@
+name: Release (staging)
+
+# Pre-release channel: tags matching -rc.N, -beta.N, -alpha.N are built
+# and published to the staging Homebrew tap so maintainers and early
+# testers can try them out before they hit the production tap.
+#
+# Stable tags (e.g. v0.2.0, v0.3.0) are handled by release.yml and go to
+# baken667/homebrew-tap. Don't tag stable releases on this workflow.
+#
+# Required secrets:
+#   HOMEBREW_TAP_STAGING_TOKEN  PAT with `repo` scope on
+#                               baken667/homebrew-tap-staging
+#
+# Usage:
+#   1. Branch off `staging` (the integration branch).
+#   2. Cut a tag:    git tag v0.2.0-rc.1
+#   3. Push the tag: git push origin v0.2.0-rc.1
+#   4. This workflow builds, signs checksums, and updates the formula in
+#      homebrew-tap-staging. The release on GitHub is marked prerelease.
+
+on:
+  push:
+    tags:
+      - "v*-rc.*"
+      - "v*-beta.*"
+      - "v*-alpha.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.2.0-rc.1). Leave blank to use the most recent matching tag."
+        required: false
+        default: ""
+      snapshot:
+        description: "Build a snapshot (no publish)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write   # create the GitHub release
+  pull-requests: read
+
+jobs:
+  release:
+    name: Build and publish pre-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for changelog
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Verify tag matches a pre-release pattern
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc|-beta|-alpha)\.[0-9]+$ ]]; then
+            echo "::error::Tag '$tag' is not a valid pre-release tag (expected vX.Y.Z-rc.N / -beta.N / -alpha.N)"
+            exit 1
+          fi
+          echo "Tag $tag validated as a pre-release."
+
+      - name: Resolve tag (workflow_dispatch input override)
+        if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
+        shell: bash
+        run: |
+          echo "Using tag from workflow_dispatch: ${{ inputs.tag }}"
+          git fetch --tags
+          git checkout -f "${{ inputs.tag }}"
+
+      - name: Run GoReleaser
+        # v5 of the action installs GoReleaser v1.x, which matches the
+        # v1.x schema in .goreleaser.staging.yaml. See release.yml for
+        # the longer explanation.
+        uses: goreleaser/goreleaser-action@v5
+        with:
+          version: latest
+          # Use the staging config; --clean wipes dist/ from any prior run.
+          args: release --clean --config .goreleaser.staging.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_STAGING_TOKEN: ${{ secrets.HOMEBREW_TAP_STAGING_TOKEN }}
+          SNAPSHOT: ${{ inputs.snapshot || 'false' }}

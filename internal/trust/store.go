@@ -37,30 +37,33 @@ const (
 )
 
 // Entry is a single trust record persisted to disk.
+//
+// Field order is dictated by govet's fieldalignment check: pointers first
+// (8 B), then time.Time (24 B), then strings (16 B), then int (8 B).
 type Entry struct {
-	Version     int       `json:"version"`
+	Signature   *Sig      `json:"signature,omitempty"`
+	ExpiresAt   time.Time `json:"expires_at,omitempty"`
+	TrustedAt   time.Time `json:"trusted_at"`
 	FileHash    string    `json:"file_hash"`
 	FilePath    string    `json:"file_path"`
-	TrustedAt   time.Time `json:"trusted_at"`
 	TrustedBy   string    `json:"trusted_by"`
 	ToolVersion string    `json:"tool_version"`
-	ExpiresAt   time.Time `json:"expires_at,omitempty"`
-	Signature   *Sig      `json:"signature,omitempty"`
 	Comment     string    `json:"comment,omitempty"`
+	Version     int       `json:"version"`
 }
 
 // Sig represents an optional ed25519 signature over the rest of the entry.
 type Sig struct {
+	SignedAt  time.Time `json:"signed_at"`
 	Algorithm string    `json:"algorithm"`
 	KeyID     string    `json:"key_id"`
 	Value     string    `json:"value"`
-	SignedAt  time.Time `json:"signed_at"`
 }
 
 // Store is a file-backed trust store rooted at $XDG_DATA_HOME/envee/trust.
 type Store struct {
-	root string
 	now  func() time.Time
+	root string
 }
 
 // NewStore returns a Store rooted at the default location.

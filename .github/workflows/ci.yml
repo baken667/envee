@@ -135,8 +135,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install GoReleaser
+      - name: Install GoReleaser (v1.x)
+        # The legacy git.io/goreleaser install script was updated and no
+        # longer accepts `-b /usr/local/bin`. We now download the v1.26.2
+        # tarball directly and put it on PATH. v1.26.2 is the last v1
+        # release, matching the v1.x schema in .goreleaser.yaml.
         run: |
-          curl -sSfL https://git.io/goreleaser | sh -s -- -b /usr/local/bin
-      - name: Check
-        run: goreleaser check
+          curl -sSfL -o /tmp/gr.tar.gz \
+            "https://github.com/goreleaser/goreleaser/releases/download/v1.26.2/goreleaser_Linux_x86_64.tar.gz"
+          tar -xzf /tmp/gr.tar.gz -C /tmp
+          sudo mv /tmp/goreleaser /usr/local/bin/goreleaser
+          goreleaser --version
+      - name: Check (main)
+        run: goreleaser check --config .goreleaser.yaml
+      - name: Check (staging)
+        run: goreleaser check --config .goreleaser.staging.yaml

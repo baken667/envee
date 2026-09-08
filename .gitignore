@@ -25,6 +25,12 @@ envee.local.*.toml
 .env
 .env.local
 
+# But the .env files inside examples/ are part of the example data
+# (they get loaded by the _.file directive in envee.toml) and must be
+# tracked. The lines below un-ignore exactly those.
+!examples/**/*.env
+!examples/**/*.env.local
+
 # Research / planning artifacts (cloned sources we analyzed)
 _research/
 

@@ -19,6 +19,13 @@ import (
 func runEvalForTest(t *testing.T, configDir, profile, shellName string) string {
 	t.Helper()
 
+	// Golden tests assert specific values for some {{env.X}} lookups
+	// (e.g. GIT_SHA defaults to "local"). On CI the runner exports
+	// GITHUB_SHA which would shadow our default, so we clear it for
+	// the duration of the test.
+	t.Setenv("GITHUB_SHA", "")
+	t.Setenv("GIT_COMMIT", "")
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +73,7 @@ func runEvalForTest(t *testing.T, configDir, profile, shellName string) string {
 // "rest of $PATH" portion depends on the system environment.
 func TestGoldenBasic(t *testing.T) {
 	got := runEvalForTest(t, "../../examples/basic", "", "bash")
-	got = normalizePath(got, "/Users/.../examples/basic")
+	got = normalizePath(got, resolveConfigDir(t, "../../examples/basic"), "/Users/.../examples/basic")
 
 	mustContain := []string{
 		"export SERVICE_NAME=myapp;",
@@ -96,7 +103,7 @@ func TestGoldenBasic(t *testing.T) {
 // TestGoldenMultiProfileDev verifies dev profile invariants.
 func TestGoldenMultiProfileDev(t *testing.T) {
 	got := runEvalForTest(t, "../../examples/multi-profile", "dev", "bash")
-	got = normalizePath(got, "/Users/.../examples/multi-profile")
+	got = normalizePath(got, resolveConfigDir(t, "../../examples/multi-profile"), "/Users/.../examples/multi-profile")
 
 	mustContain := []string{
 		"export SERVICE_NAME=myapp;",        // base
@@ -117,7 +124,7 @@ func TestGoldenMultiProfileDev(t *testing.T) {
 // TestGoldenMonorepo verifies that root + service configs are merged correctly.
 func TestGoldenMonorepo(t *testing.T) {
 	got := runEvalForTest(t, "../../examples/monorepo/services/api", "", "bash")
-	got = normalizePath(got, "/Users/.../examples/monorepo/services/api")
+	got = normalizePath(got, resolveConfigDir(t, "../../examples/monorepo/services/api"), "/Users/.../examples/monorepo/services/api")
 
 	// Check key invariants without exact-string match (PATH order varies by env).
 	mustContain := []string{
@@ -135,17 +142,31 @@ func TestGoldenMonorepo(t *testing.T) {
 	}
 }
 
-// normalizePath replaces the absolute prefix of any path in the script with
-// a stable placeholder, so golden tests work across machines.
-func normalizePath(s, placeholder string) string {
-	// Find any absolute path in the input and replace with placeholder.
-	// We use a simple heuristic: any "/Users/.../examples/..." pattern.
-	for _, ex := range []string{
-		"/Users/baken/coding/oss/envee/examples/basic",
-		"/Users/baken/coding/oss/envee/examples/multi-profile",
-		"/Users/baken/coding/oss/envee/examples/monorepo",
-	} {
-		s = strings.ReplaceAll(s, ex, strings.TrimSuffix(placeholder, "/services/api"))
+// resolveConfigDir makes the relative config path absolute, so the
+// normalize step can replace the actual on-disk path with the test's
+// portable placeholder regardless of the host OS.
+func resolveConfigDir(t *testing.T, rel string) string {
+	t.Helper()
+	abs, err := filepath.Abs(rel)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return s
+	return abs
+}
+
+// normalizePath replaces the absolute configDir prefix in the script with
+// a stable placeholder, so golden tests work across machines (macOS dev +
+// Linux CI runner). The placeholder has the same trailing sub-path as the
+// configDir, e.g.
+//
+//	configDir = "/home/runner/work/envee/envee/examples/monorepo/services/api"
+//	placeholder = "/Users/.../examples/monorepo/services/api"
+//
+// Any sub-path under configDir (e.g. ".../examples/monorepo/services/api/foo")
+// is preserved verbatim — only the prefix is rewritten.
+func normalizePath(s, configDir, placeholder string) string {
+	// Replace any occurrence of the absolute configDir prefix with the
+	// placeholder. Walk the configDir from longest to shortest so that
+	// nested paths are replaced at the deepest level first.
+	return strings.ReplaceAll(s, configDir, placeholder)
 }

@@ -112,8 +112,8 @@ func handleResolve(p Plugin) {
 	}
 
 	var req Request
-	if err := json.Unmarshal(data, &req); err != nil {
-		writeError("", "invalid_request", "parse: "+err.Error(), false)
+	if uerr := json.Unmarshal(data, &req); uerr != nil {
+		writeError("", "invalid_request", "parse: "+uerr.Error(), false)
 		os.Exit(1)
 	}
 	if req.APIVersion != APIVersion {
