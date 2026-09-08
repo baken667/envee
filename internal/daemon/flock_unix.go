@@ -14,6 +14,9 @@ func flockExclusive(f *os.File) error {
 }
 
 // flockUnlock releases the lock on f.
-func flockUnlock(f *os.File) error {
-	return syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+//
+// Returns nothing because this is only called from a cleanup path
+// (releaseLock) where there is nothing actionable for the caller.
+func flockUnlock(f *os.File) {
+	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 }

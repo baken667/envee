@@ -11,6 +11,10 @@ func flockExclusive(f *os.File) error {
 	return nil
 }
 
-func flockUnlock(f *os.File) error {
-	return nil
+// flockUnlock on Windows: no-op.
+//
+// Returns nothing because this is only called from a cleanup path
+// where there is nothing actionable for the caller.
+func flockUnlock(f *os.File) {
+	_ = f // suppress unused parameter
 }

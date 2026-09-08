@@ -19,6 +19,13 @@ import (
 func runEvalForTest(t *testing.T, configDir, profile, shellName string) string {
 	t.Helper()
 
+	// Golden tests assert specific values for some {{env.X}} lookups
+	// (e.g. GIT_SHA defaults to "local"). On CI the runner exports
+	// GITHUB_SHA which would shadow our default, so we clear it for
+	// the duration of the test.
+	t.Setenv("GITHUB_SHA", "")
+	t.Setenv("GIT_COMMIT", "")
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
