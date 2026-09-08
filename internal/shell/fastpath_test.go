@@ -16,9 +16,7 @@ import (
 // envee NOT being run, and only a counter can check that.
 func countingEnvee(t *testing.T, counter, evalOutput string) string {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX shells only")
-	}
+	skipOnWindows(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "envee")
 	script := "#!/bin/sh\necho x >> " + counter + "\ncat <<'ENVEE_EOF'\n" + evalOutput + "ENVEE_EOF\n"
@@ -38,6 +36,23 @@ func readCount(t *testing.T, counter string) int {
 		t.Fatal(err)
 	}
 	return strings.Count(string(data), "\n")
+}
+
+// skipOnWindows guards the whole file: these hooks are POSIX shell scripts,
+// and Windows paths cannot be interpolated into one — the backslashes are
+// eaten as escapes, which is how this first showed up in CI.
+func skipOnWindows(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell hooks; Windows uses the pwsh hook, covered separately")
+	}
+}
+
+// shq single-quotes a path for interpolation into a shell script. Temporary
+// directories are tame, but building shell scripts by concatenation is exactly
+// the habit that produced the escaping bugs this project has already had.
+func shq(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 type fastPathCase struct {
@@ -92,7 +107,7 @@ func TestFastPathSkipsRepeatedPrompts(t *testing.T) {
 			}
 
 			// One initial invocation, then nine more prompts with nothing changed.
-			script := "cd " + dir + "\nsource " + hook + "\n" + tc.entry + "\n" +
+			script := "cd " + shq(dir) + "\nsource " + shq(hook) + "\n" + tc.entry + "\n" +
 				strings.Repeat(tc.entry+"\n", 9)
 			runScript(t, tc.shell, script)
 
@@ -123,8 +138,8 @@ func TestFastPathReactsToChangedDependency(t *testing.T) {
 
 			// Prompt, touch the dependency, prompt again. sleep gives the
 			// filesystem a distinguishable mtime.
-			script := "cd " + dir + "\nsource " + hook + "\n" + tc.entry + "\n" +
-				tc.entry + "\nsleep 1.1\ntouch " + watched + "\n" + tc.entry + "\n"
+			script := "cd " + shq(dir) + "\nsource " + shq(hook) + "\n" + tc.entry + "\n" +
+				tc.entry + "\nsleep 1.1\ntouch " + shq(watched) + "\n" + tc.entry + "\n"
 			runScript(t, tc.shell, script)
 
 			if got := readCount(t, counter); got != 2 {
@@ -156,8 +171,8 @@ func TestFastPathReactsToDirectoryChange(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			script := "cd " + dir + "\nsource " + hook + "\n" + tc.entry + "\n" +
-				"cd " + other + "\n" + tc.entry + "\n"
+			script := "cd " + shq(dir) + "\nsource " + shq(hook) + "\n" + tc.entry + "\n" +
+				"cd " + shq(other) + "\n" + tc.entry + "\n"
 			runScript(t, tc.shell, script)
 
 			if got := readCount(t, counter); got != 2 {
@@ -172,6 +187,7 @@ func TestFastPathReactsToDirectoryChange(t *testing.T) {
 func TestFastPathNotArmedOnFailure(t *testing.T) {
 	for _, tc := range fastPathCases() {
 		t.Run(tc.shell, func(t *testing.T) {
+			skipOnWindows(t)
 			dir := t.TempDir()
 			counter := filepath.Join(dir, "calls")
 
@@ -187,7 +203,7 @@ func TestFastPathNotArmedOnFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			body := "cd " + dir + "\nsource " + hook + "\n" + strings.Repeat(tc.entry+"\n", 3)
+			body := "cd " + shq(dir) + "\nsource " + shq(hook) + "\n" + strings.Repeat(tc.entry+"\n", 3)
 			runScript(t, tc.shell, body)
 
 			if got := readCount(t, counter); got != 3 {
@@ -220,7 +236,7 @@ func TestFastPathHandlesAwkwardPaths(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			body := "cd " + dir + "\nsource " + hook + "\n" + strings.Repeat(tc.entry+"\n", 4)
+			body := "cd " + shq(dir) + "\nsource " + shq(hook) + "\n" + strings.Repeat(tc.entry+"\n", 4)
 			out := runScript(t, tc.shell, body)
 
 			if got := readCount(t, counter); got != 1 {
@@ -282,6 +298,7 @@ func TestHookPreservesExitStatus(t *testing.T) {
 	for _, tc := range cases {
 		for _, mode := range []string{"succeeding", "failing"} {
 			t.Run(tc.shell+"/"+mode, func(t *testing.T) {
+				skipOnWindows(t)
 				dir := t.TempDir()
 				counter := filepath.Join(dir, "calls")
 				dep := filepath.Join(dir, "envee.toml")
@@ -306,7 +323,7 @@ func TestHookPreservesExitStatus(t *testing.T) {
 				}
 
 				// Produce a known exit status, then run the hook, then report $?.
-				script := "cd " + dir + "\nsource " + hook + "\n" +
+				script := "cd " + shq(dir) + "\nsource " + shq(hook) + "\n" +
 					tc.setStatus + "\n" + tc.entry + "\n" + tc.probe + "\n"
 
 				shellBin, err := exec.LookPath(tc.shell)
