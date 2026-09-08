@@ -69,6 +69,14 @@ func (m *Map) Get(key string) (string, bool) {
 	return "", false
 }
 
+// GetWithMeta returns the full entry (value + metadata).
+func (m *Map) GetWithMeta(key string) (Entry, bool) {
+	if i, ok := m.index[key]; ok {
+		return m.entries[i], true
+	}
+	return Entry{}, false
+}
+
 // Set inserts or updates an entry.
 func (m *Map) Set(key, value string) {
 	if i, ok := m.index[key]; ok {

@@ -37,9 +37,7 @@ _.path = [
   "{{config_root}}/vendor/bin",
 ]
 
-_.file = ".env"
-
-# Inline directive with redaction
+# Load .env files (dotenv format). Multiple paths supported.
 _.file = [
   { path = ".env", required = false },
   { path = ".env.local", redact = true, required = false },

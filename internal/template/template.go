@@ -185,3 +185,30 @@ func unquote(s string) string {
 	}
 	return s
 }
+
+// ExtractVarRefs scans a template string and returns the names of all variables
+// it references (e.g., "{{config_root}}/logs/{{profile}}.log" → ["config_root", "profile"]).
+//
+// Used by the directive layer to build a dependency graph for topological sort.
+func ExtractVarRefs(s string) []string {
+	var refs []string
+	i := 0
+	for i < len(s) {
+		if i+1 < len(s) && s[i] == '{' && s[i+1] == '{' {
+			end := strings.Index(s[i+2:], "}}")
+			if end < 0 {
+				return refs
+			}
+			expr := strings.TrimSpace(s[i+2 : i+2+end])
+			// Strip pipe filters.
+			if pipe := strings.Index(expr, "|"); pipe >= 0 {
+				expr = strings.TrimSpace(expr[:pipe])
+			}
+			refs = append(refs, expr)
+			i += 2 + end + 2
+			continue
+		}
+		i++
+	}
+	return refs
+}

@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 )
 
 // Options configures the package-level logger.
@@ -99,3 +100,12 @@ func Error(msg string, args ...any) { current.Error(msg, args...) }
 
 // With returns a logger with the given attributes attached.
 func With(args ...any) *slog.Logger { return current.With(args...) }
+
+// quiet suppresses all non-error output when set.
+var quietFlag atomic.Bool
+
+// SetQuiet toggles quiet mode.
+func SetQuiet(q bool) { quietFlag.Store(q) }
+
+// IsQuiet reports whether quiet mode is active.
+func IsQuiet() bool { return quietFlag.Load() }

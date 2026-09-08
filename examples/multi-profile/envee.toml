@@ -41,12 +41,9 @@ DATABASE_PASSWORD = { source = "vault", ref = "secret/data/staging/db#password",
 # ---- Profile: prod ----------------------------------------------------------
 [profiles.prod]
 extends = ["common"]
+required = ["DATABASE_URL", "DATABASE_PASSWORD", "SENTRY_DSN", "STRIPE_API_KEY"]
 
 [profiles.prod.env]
 DATABASE_URL = { value = "postgres://prod-db.example.com:5432/mydb", required = true }
 LOG_LEVEL = "warn"
 SENTRY_DSN = "https://prod@sentry.example.com/1"
-
-# Profile-specific requirements: when prod is active, these MUST be present.
-[profiles.prod]
-required = ["DATABASE_URL", "DATABASE_PASSWORD", "SENTRY_DSN", "STRIPE_API_KEY"]
