@@ -259,8 +259,15 @@ func (FishAdapter) Name() Name { return Fish }
 // Init implements Adapter.
 func (FishAdapter) Init(selfPath string) string {
 	return renderInitTemplate(`# envee shell hook for fish
+#
+# `+"`string collect`"+` is load-bearing. Command substitution in fish splits
+# output into a LIST on newlines, and eval joins a list with spaces -- so
+# without it the separate statements arrive as one line,
+# "set -gx A 1 set -gx B 2 ...", and every variable after the first lands in
+# the first one's value. string collect keeps the output as a single string
+# with its newlines intact.
 function _envee_hook --on-variable PWD
-  set -l out ("{{.SelfPath}}" --quiet eval fish 2>/dev/null)
+  set -l out ("{{.SelfPath}}" --quiet eval fish 2>/dev/null | string collect)
   if test $status -eq 0 -a -n "$out"
     eval $out
   end
