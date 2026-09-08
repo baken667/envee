@@ -127,6 +127,8 @@ Now every time you `cd` into this project, the env vars are automatically loaded
 |---|---|
 | `envee init <shell>` | Output shell hook code |
 | `envee trust [path]` | Approve an `envee.toml` (interactive) |
+| `envee trust --sign` | Approve and sign the entry so it can be shared |
+| `envee trust --from F --public-key K` | Import someone else's signed approval, after verifying it |
 | `envee deny [path]` | Block an `envee.toml` |
 | `envee status` | Show current state and resolved env |
 | `envee resolve` | Compute and print the resolved environment (text or JSON) |
@@ -146,6 +148,29 @@ Planned, and currently hidden from `--help` because they are not implemented:
 `envee trust --sign`. They exit non-zero rather than pretending to succeed.
 
 Error codes and exit codes are documented in [docs/errors.md](docs/errors.md).
+
+## Sharing trust across a team
+
+An approval can be signed, so one reviewer's decision can be reused instead of
+every person re-reviewing the same config.
+
+```bash
+# Reviewer: approve and sign with an ed25519 SSH key.
+envee trust --sign --key ~/.ssh/id_ed25519 --export envee.trust.json
+
+# Everyone else: import it, verified against the reviewer's public key.
+envee trust --from envee.trust.json --public-key reviewer.pub
+```
+
+The signature covers the config's content hash along with the rest of the
+entry, so it stops being valid the moment the config changes — a re-review is
+required rather than silently inherited. `--public-key` is mandatory on
+import: accepting an entry without checking it would let anyone approve
+configs on your behalf.
+
+`envee status --trust` shows which entries are signed and by which key.
+
+See [ADR-0004](docs/adr/0004-trust-model.md) for the design.
 
 ## Plugins
 

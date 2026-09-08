@@ -229,6 +229,10 @@ func printStatus(cmd *cobra.Command, cfg *config.Config, result *directive.Resul
 			fmt.Printf("    trusted: %s by %s (envee %s)\n",
 				e.TrustedAt.Format(time.RFC3339), e.TrustedBy, e.ToolVersion)
 			fmt.Printf("    expires: %s\n", expiry)
+			if e.Signature != nil {
+				fmt.Printf("    signed:  %s by %s (key %s)\n",
+					e.Signature.Algorithm, e.TrustedBy, e.Signature.KeyID)
+			}
 		}
 	}
 

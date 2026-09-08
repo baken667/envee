@@ -9,6 +9,42 @@ the curated view.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-08
+
+### Added
+
+- **Shareable trust via ed25519 signatures** (`envee trust --sign`), completing
+  the design in ADR-0004. A reviewer approves a config once and signs the
+  entry; colleagues import it verified against the reviewer's public key
+  instead of re-reviewing the file.
+
+  ```bash
+  envee trust --sign --key ~/.ssh/id_ed25519 --export envee.trust.json
+  envee trust --from envee.trust.json --public-key reviewer.pub
+  ```
+
+  The signature covers a deterministic JSON encoding of the whole entry except
+  the signature itself, so it stops verifying the moment the config's content
+  hash, path, expiry or any other field changes. `--public-key` is mandatory
+  on import: accepting an entry unverified would let anyone approve configs on
+  your behalf. Keys are ordinary OpenSSH ed25519 keys; RSA and
+  passphrase-protected keys are rejected with an explanation rather than a
+  cryptic parse error.
+
+  `envee status --trust` shows which entries are signed and by which key.
+- SBOMs are published with each release archive, catalogued by syft. CI builds
+  them on every pull request, so a missing syft cannot surface for the first
+  time during a release.
+
+### Fixed
+
+- Tests that set `$XDG_DATA_HOME` were not isolated: `adrg/xdg` reads the
+  environment once at package initialisation, so `t.Setenv` alone left them
+  reading and **writing the developer's real trust store**. `paths.IsolateForTest`
+  now reloads xdg and restores it afterwards. This was not hypothetical — a
+  test wrote an entry into a real store before the helper existed.
+
+
 ## [0.1.2] — 2026-09-08
 
 ### Fixed
@@ -148,6 +184,7 @@ green, and completions and man pages installed to the right prefixes.
 - `envee trust --sign` (ed25519) is not implemented.
 - The WASM script sandbox (`_.script`) is not implemented.
 
-[Unreleased]: https://github.com/baken667/envee/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/baken667/envee/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/baken667/envee/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/baken667/envee/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/baken667/envee/releases/tag/v0.1.1
