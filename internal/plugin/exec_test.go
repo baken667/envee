@@ -219,7 +219,9 @@ func TestDiscoverPaths(t *testing.T) {
 			t.Errorf("discovery missed %q (found %v)", want, names)
 		}
 	}
-	if names["notexec"] && runtime.GOOS != "windows" {
+	// Not executable on either platform: no exec bit on Unix, and no
+	// PATHEXT extension on Windows.
+	if names["notexec"] {
 		t.Error("a non-executable file was reported as a plugin")
 	}
 	if names[""] || names["unrelated-binary"] {

@@ -159,8 +159,11 @@ DATABASE_URL = "postgres://{{env.HOST}}/{{env.DB}}"
 		t.Fatal(err)
 	}
 
-	wantPath := filepath.Join(dir, "logs", "dev.log")
-	if v, _ := res.Env.Get("LOG_PATH"); v != wantPath {
+	// The template is "{{config_root}}/logs/{{profile}}.log": config_root is a
+	// native path, the rest is the literal text the author wrote. On Windows
+	// that legitimately yields a mixed-separator path, so compare normalised.
+	wantPath := filepath.ToSlash(filepath.Join(dir, "logs", "dev.log"))
+	if v, _ := res.Env.Get("LOG_PATH"); filepath.ToSlash(v) != wantPath {
 		t.Errorf("LOG_PATH = %q, want %q", v, wantPath)
 	}
 	if v, _ := res.Env.Get("DATABASE_URL"); v != "postgres://localhost/mydb" {

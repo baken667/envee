@@ -1,6 +1,7 @@
 package template
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -104,14 +105,20 @@ func TestQuoteFilter(t *testing.T) {
 
 func TestDirnameBasename(t *testing.T) {
 	e := New()
-	got, err := e.Render("{{config_root | dirname}}", &Context{ConfigRoot: "/a/b/c"})
+	// The filters wrap filepath.Dir/Base, which return native separators, so
+	// the expectation has to be built the same way rather than hardcoded to
+	// POSIX -- on Windows filepath.Dir("/a/b/c") is `\a\b`.
+	root := filepath.Join("/a", "b", "c")
+
+	got, err := e.Render("{{config_root | dirname}}", &Context{ConfigRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "/a/b" {
-		t.Errorf("dirname = %q, want /a/b", got)
+	if want := filepath.Dir(root); got != want {
+		t.Errorf("dirname = %q, want %q", got, want)
 	}
-	got, _ = e.Render("{{config_root | basename}}", &Context{ConfigRoot: "/a/b/c"})
+
+	got, _ = e.Render("{{config_root | basename}}", &Context{ConfigRoot: root})
 	if got != "c" {
 		t.Errorf("basename = %q, want c", got)
 	}

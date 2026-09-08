@@ -6,6 +6,9 @@ package plugin
 
 import (
 	"context"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 )
 
@@ -70,13 +73,16 @@ func DiscoverAndLoad(ctx context.Context) (*Dispatcher, error) {
 
 // pluginNameFromPath extracts "foo" from "/path/to/envee-plugin-foo".
 func pluginNameFromPath(path string) string {
-	base := path
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' {
-			base = path[i+1:]
-			break
-		}
+	// filepath.Base rather than a hand-rolled scan for '/': on Windows the
+	// separator is '\\', so the manual loop returned the whole path.
+	base := filepath.Base(path)
+
+	// Drop the executable extension on Windows, or the plugin would be named
+	// "op.exe" and never match a config's source = "op".
+	if runtime.GOOS == "windows" {
+		base = strings.TrimSuffix(base, filepath.Ext(base))
 	}
+
 	const prefix = "envee-plugin-"
 	if len(base) <= len(prefix) {
 		return ""
