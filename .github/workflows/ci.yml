@@ -138,7 +138,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Install nushell and fish
+      - name: Install nushell, fish and zsh
         # Both hooks shipped broken, and in both cases the shell was missing
         # from the runner so the test that would have caught it skipped:
         #
@@ -152,10 +152,12 @@ jobs:
         # which is how both reached a release. Install the shells here and fail
         # below if any is absent.
         #
-        # bash, zsh and PowerShell need no step: all three are preinstalled.
+        # bash and PowerShell need no step; zsh does, despite the assumption
+        # that it is standard — the presence guard below caught that.
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq fish
+          sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh
           fish --version
+          zsh --version
           version=0.115.1
           curl -sSfL -o /tmp/nu.tar.gz \
             "https://github.com/nushell/nushell/releases/download/${version}/nu-${version}-x86_64-unknown-linux-gnu.tar.gz"
