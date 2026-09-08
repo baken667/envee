@@ -12,11 +12,16 @@ name: Release (staging)
 #                               baken667/homebrew-tap-staging
 #
 # Usage:
-#   1. Branch off `staging` (the integration branch).
-#   2. Cut a tag:    git tag v0.2.0-rc.1
-#   3. Push the tag: git push origin v0.2.0-rc.1
-#   4. This workflow builds, signs checksums, and updates the formula in
-#      homebrew-tap-staging. The release on GitHub is marked prerelease.
+#   1. Land the work on `staging` (the integration branch) via pull request.
+#   2. Cut a tag from it: git tag -a v0.2.0-rc.1 -m "..."
+#   3. Push the tag:      git push origin v0.2.0-rc.1
+#   4. This workflow builds and updates the formula in homebrew-tap-staging.
+#      The release on GitHub is marked prerelease.
+#   5. Verify: brew install baken667/tap-staging/envee
+#
+# Note this workflow keys off the TAG, not the branch — a pre-release tag
+# anywhere triggers it. Cutting it from `staging` is the convention, not
+# something the workflow enforces.
 
 on:
   push:
