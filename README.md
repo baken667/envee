@@ -58,15 +58,10 @@ go install github.com/baken667/envee/cmd/envee@latest
 | bash | `echo 'eval "$(envee init bash)"' >> ~/.bashrc` |
 | zsh  | `echo 'eval "$(envee init zsh)"' >> ~/.zshrc` |
 | fish | `echo 'envee init fish \| source' >> ~/.config/fish/config.fish` |
-| nu   | *experimental* — `envee init nu \| save -f ~/.config/envee.nu; source ~/.config/envee.nu` |
-| pwsh | *experimental* — `envee init pwsh \| Out-String \| Invoke-Expression` |
+| nu   | `envee init nu \| save -f ~/.config/envee.nu; source ~/.config/envee.nu` |
+| pwsh | `envee init pwsh \| Out-String \| Invoke-Expression` |
 
 Restart your shell or `source` the config file.
-
-> **nu and pwsh are not usable yet.** Both hooks apply the environment in a
-> child scope — nushell runs `nu -c`, and the PowerShell hook is registered on
-> `OnIdle`, which executes in a separate runspace — so nothing reaches your
-> session. bash, zsh and fish work.
 
 ### Create your first `envee.toml`
 
