@@ -12,6 +12,7 @@ import (
 	"github.com/baken667/envee/internal/env"
 	"github.com/baken667/envee/internal/errs"
 	"github.com/baken667/envee/internal/log"
+	"github.com/baken667/envee/internal/plugin"
 	"github.com/baken667/envee/internal/resolver"
 	"github.com/baken667/envee/internal/shell"
 	"github.com/baken667/envee/internal/trust"
@@ -82,12 +83,13 @@ func runEval(cmd *cobra.Command, shellName string) error {
 
 	// 6. Apply directives.
 	osEnv := envToMap(os.Environ())
+	dispatcher, _ := plugin.DiscoverAndLoad(cmd.Context())
 	result, err := directive.Apply(cmd.Context(), cfg, directive.ApplyOptions{
 		ConfigRoot: configRoot,
 		Profile:    activeProfile,
 		Cwd:        cwd,
 		OSEnv:      osEnv,
-	}, nil)
+	}, dispatcher)
 	if err != nil {
 		return err
 	}

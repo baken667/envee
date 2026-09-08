@@ -57,6 +57,16 @@ func ParseBytes(path string, data []byte) (*Config, error) {
 		delete(cfg.Env, "_")
 	}
 
+	// Post-process: lift inline keys in [profiles.X] into Profile.Env.
+	// Supports both:
+	//   [profiles.dev]
+	//   var = "value"     # inline (lifted into Env)
+	//
+	//   [profiles.dev]
+	//   [profiles.dev.env]
+	//   var = "value"     # nested (already in Env)
+	flattenProfileEnv(cfg, data)
+
 	// Compute canonical hash.
 	cfg.FileHash = canonicalHash(data)
 
@@ -155,6 +165,44 @@ func directivesFromMap(m map[string]any) *Directives {
 	}
 
 	return d
+}
+
+// flattenProfileEnv lifts inline keys in [profiles.X] into Profile.Env.
+//
+// We re-parse the original data as a map to find inline keys, since
+// BurntSushi has already decoded them into Profile fields. Any key that
+// is NOT in {extends, required, env, env._} is moved into Profile.Env.
+func flattenProfileEnv(cfg *Config, data []byte) {
+	var raw map[string]any
+	if _, err := toml.Decode(string(data), &raw); err != nil {
+		return
+	}
+	profilesRaw, ok := raw["profiles"].(map[string]any)
+	if !ok {
+		return
+	}
+	reservedKeys := map[string]bool{
+		"extends": true, "required": true, "env": true, "env._": true,
+	}
+	for name, raw := range profilesRaw {
+		pmap, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		prof, ok := cfg.Profiles[name]
+		if !ok || prof == nil {
+			continue
+		}
+		if prof.Env == nil {
+			prof.Env = make(map[string]any)
+		}
+		// Find inline env vars (keys not in reserved set).
+		for k, v := range pmap {
+			if !reservedKeys[k] {
+				prof.Env[k] = v
+			}
+		}
+	}
 }
 
 func strOf(v any) string {

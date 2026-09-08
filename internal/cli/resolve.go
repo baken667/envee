@@ -10,6 +10,7 @@ import (
 
 	"github.com/baken667/envee/internal/directive"
 	"github.com/baken667/envee/internal/errs"
+	"github.com/baken667/envee/internal/plugin"
 	"github.com/baken667/envee/internal/resolver"
 )
 
@@ -58,12 +59,13 @@ func runResolve(cmd *cobra.Command, jsonOut bool, shellName string, includeOS, d
 	}
 
 	osEnv := envToMap(os.Environ())
+	dispatcher, _ := plugin.DiscoverAndLoad(cmd.Context())
 	result, err := directive.Apply(cmd.Context(), cfg, directive.ApplyOptions{
 		ConfigRoot: filepath.Dir(cfg.Path),
 		Profile:    profile,
 		Cwd:        cwd,
 		OSEnv:      osEnv,
-	}, nil)
+	}, dispatcher)
 	if err != nil {
 		return err
 	}

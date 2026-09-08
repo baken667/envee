@@ -101,7 +101,17 @@ func (e *Engine) evalExpr(expr string, ctx *Context) (string, error) {
 			return "", fmt.Errorf("undefined env var: %s", key)
 		}
 	default:
-		return "", fmt.Errorf("unknown variable: %s", head)
+		// Bare name: look up as env var (resolved first, then OS).
+		// Allows {{HOST}} to work the same as {{env.HOST}}.
+		if v, ok := ctx.Env[head]; ok {
+			val = v
+		} else if v, ok := ctx.OSEnv[head]; ok {
+			val = v
+		} else if hasDefault {
+			val = ""
+		} else {
+			return "", fmt.Errorf("unknown variable: %s", head)
+		}
 	}
 
 	// Apply filters.
@@ -189,7 +199,8 @@ func unquote(s string) string {
 // ExtractVarRefs scans a template string and returns the names of all variables
 // it references (e.g., "{{config_root}}/logs/{{profile}}.log" → ["config_root", "profile"]).
 //
-// Used by the directive layer to build a dependency graph for topological sort.
+// The "env." prefix is stripped: "{{env.HOME}}" → "HOME" (since env vars
+// reference other resolved env vars in the same scope).
 func ExtractVarRefs(s string) []string {
 	var refs []string
 	i := 0
@@ -204,6 +215,8 @@ func ExtractVarRefs(s string) []string {
 			if pipe := strings.Index(expr, "|"); pipe >= 0 {
 				expr = strings.TrimSpace(expr[:pipe])
 			}
+			// Strip "env." prefix.
+			expr = strings.TrimPrefix(expr, "env.")
 			refs = append(refs, expr)
 			i += 2 + end + 2
 			continue

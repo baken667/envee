@@ -112,6 +112,7 @@ Get started:
 		newDebugCmd(),
 		newCompletionCmd(),
 		newVersionCmd(),
+		newSecretCmd(),
 		newPluginCmd(),
 		newDaemonCmd(),
 		newTelemetryCmd(),

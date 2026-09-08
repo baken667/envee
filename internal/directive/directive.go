@@ -19,6 +19,13 @@ import (
 	"github.com/baken667/envee/internal/template"
 )
 
+// Directives is an alias for the config type, used in this package to avoid
+// importing the long config name everywhere.
+type Directives = config.Directives
+
+// SecretRef is an alias for the config type.
+type SecretRef = config.SecretRef
+
 // Result is the output of Apply.
 type Result struct {
 	// Env is the resolved environment (vars + their values + metadata).
@@ -50,9 +57,12 @@ type ApplyOptions struct {
 // implementation lives in internal/plugin; this interface allows tests to
 // inject a mock without depending on the plugin runtime.
 //
-// For now (MVP), if a PluginResolver is nil, secret/script directives return
-// an error directing the user to install the corresponding plugin.
+// For now (MVP), if a PluginResolver is nil, secret directives set
+// "__UNRESOLVED__:source:ref" placeholders.
 type PluginResolver interface {
+	// ResolveSecret looks up a secret by source + ref.
+	// The source identifies the plugin (e.g., "env", "op", "aws").
+	// The ref is the source-specific reference (e.g., "DATABASE_PASSWORD").
 	ResolveSecret(ctx context.Context, source, ref string) (string, error)
 }
 
@@ -111,6 +121,31 @@ func Apply(ctx context.Context, cfg *config.Config, opts ApplyOptions, reg Plugi
 		// Skip the special "_" key (used for directives) and reserved meta keys.
 		if k == "_" || isMetaKey(k) {
 			continue
+		}
+		// Detect secret shorthand: inline table with `source` + `ref`.
+		if m, ok := v.(map[string]any); ok {
+			if src, _ := m["source"].(string); src != "" {
+				ref, _ := m["ref"].(string)
+				if ref == "" {
+					return nil, errs.New("E003", "secret shorthand missing 'ref'").
+						WithContext("key", k)
+				}
+				if cfg.Directives == nil {
+					cfg.Directives = &Directives{}
+				}
+				if cfg.Directives.Secret == nil {
+					cfg.Directives.Secret = make(map[string]SecretRef)
+				}
+				redact, _ := m["redact"].(bool)
+				required, _ := m["required"].(bool)
+				cfg.Directives.Secret[k] = SecretRef{
+					Source:   src,
+					Ref:      ref,
+					Redact:   redact,
+					Required: required,
+				}
+				continue // resolve in step 6
+			}
 		}
 		val, redact, err := coerceValue(v)
 		if err != nil {
@@ -247,6 +282,11 @@ func evaluateTemplates(res *Result, opts ApplyOptions) error {
 	// Render in order.
 	newMap := env.New()
 	for _, k := range order {
+		// Skip nodes that aren't in our resolved env (they were added
+		// as deps but are external, like OS env vars).
+		if _, exists := res.Env.GetWithMeta(k); !exists {
+			continue
+		}
 		v, _ := res.Env.Get(k)
 		meta, _ := res.Env.GetWithMeta(k)
 
@@ -326,14 +366,13 @@ func applyFileDirective(ctx context.Context, cfg *config.Config, opts ApplyOptio
 	})
 }
 
-// applySecretDirectives resolves _.secret.* entries.
+// applySecretDirectives resolves _.secret.* entries via the PluginResolver.
 func applySecretDirectives(ctx context.Context, cfg *config.Config, opts ApplyOptions, res *Result, reg PluginResolver) error {
 	if cfg.Directives == nil || len(cfg.Directives.Secret) == 0 {
 		return nil
 	}
 	if reg == nil {
-		// No resolver → warn but don't fail (allows eval to work without plugins).
-		// Will be implemented properly in T3.
+		// No resolver → placeholders with redaction.
 		for name, ref := range cfg.Directives.Secret {
 			res.Env.SetWithMeta(env.Entry{
 				Key:      name,
@@ -352,7 +391,7 @@ func applySecretDirectives(ctx context.Context, cfg *config.Config, opts ApplyOp
 					WithContext("source", ref.Source).
 					WithContext("ref", ref.Ref)
 			}
-			// Non-required: skip silently (or set to empty).
+			// Non-required: skip silently.
 			continue
 		}
 		res.Env.SetWithMeta(env.Entry{
