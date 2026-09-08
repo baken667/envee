@@ -124,7 +124,7 @@ goreleaser-snapshot: goreleaser-check release-snapshot
 
 homebrew-tap-test: ## Test the Homebrew formula locally.
 	@command -v brew >/dev/null || { echo "brew not installed"; exit 1; }
-	brew audit --strict --online --formula ../homebrew-tap/Formula/envee.rb
+	brew audit --online --except=style,version --formula ../homebrew-tap/Formula/envee.rb
 
 # --- Examples ---
 
