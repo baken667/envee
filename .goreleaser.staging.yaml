@@ -43,7 +43,8 @@ builds:
       - -X github.com/baken667/envee/internal/version.Version={{.Version}}
       - -X github.com/baken667/envee/internal/version.Commit={{.ShortCommit}}
       - -X github.com/baken667/envee/internal/version.Date={{.Date}}
-      - -X github.com/baken667/envee/internal/version.GoVersion={{.GoVersion}}
+      # Note: .GoVersion template var was removed in goreleaser v1.18+.
+      # Use the default "unknown" for the GoVersion field.
 
   - id: enveed
     main: ./cmd/enveed
@@ -64,6 +65,7 @@ builds:
       - -X github.com/baken667/envee/internal/version.Version={{.Version}}
       - -X github.com/baken667/envee/internal/version.Commit={{.ShortCommit}}
       - -X github.com/baken667/envee/internal/version.Date={{.Date}}
+      # Note: .GoVersion template var was removed in goreleaser v1.18+.
 
 archives:
   - id: envee-archive
