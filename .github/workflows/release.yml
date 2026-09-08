@@ -57,22 +57,3 @@ jobs:
           COSIGN_KEY: ${{ secrets.COSIGN_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
           SNAPSHOT: ${{ inputs.snapshot || 'false' }}
-
-  # ---- SLSA provenance -----------------------------------------------------
-
-  slsa:
-    name: SLSA provenance
-    needs: release
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Generate provenance
-        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_dockerfile@v2
-        with:
-          image: ghcr.io/baken/envee
-          digest: ${{ steps.digest.outputs.digest }}
-          tag: ${{ github.ref_name }}
