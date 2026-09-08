@@ -9,7 +9,33 @@ the curated view.
 
 ## [Unreleased]
 
+### Added
+
+- **The shell hook no longer runs envee on every prompt.** It records which
+  files the resolved environment depends on and compares them against a stamp
+  using only shell builtins — no fork, no subprocess. When nothing has
+  changed, which is the overwhelmingly common case, a prompt costs nothing
+  measurable: 200 consecutive prompts did not accumulate a microsecond, versus
+  3.9 ms each before. bash, zsh and fish.
+
+  The dependency list covers every contributing config file, files pulled in
+  by `_.file` and `_.source`, paths named by `watch`, and the directories they
+  live in — the directories being what makes a newly created or deleted file
+  visible at all. Paths go through the same shell escaping as variable values,
+  since the list is evaluated as shell code.
+
+  A failed run deliberately does not arm the fast path, so `envee trust` takes
+  effect on the next prompt rather than waiting for a directory change.
+
 ### Fixed
+
+- **The hook clobbered the shell's exit status.** It runs from the prompt, so
+  a prompt displaying `$?` reported envee's internals instead of the command
+  the user had just run. All three hooks now save and restore it.
+- **`watch` was never read.** The key is documented, present in
+  `examples/basic/envee.toml` and excluded from becoming a variable, but
+  nothing ever parsed it: `WatchedPaths` stayed nil, so the documented "reload
+  when these change" behaviour did not exist.
 
 - **`[env._.secret.NAME]` was silently discarded.** The parser handled the
   `file`, `path` and `script` directives but not `secret` or `source`, so the

@@ -67,6 +67,18 @@ func ParseBytes(path string, data []byte) (*Config, error) {
 	//   var = "value"     # nested (already in Env)
 	flattenProfileEnv(cfg, data)
 
+	// Lift `watch` out of [env] into WatchedPaths.
+	//
+	// It is written inside the [env] table (see examples/basic/envee.toml) and
+	// isMetaKey keeps it from becoming a variable, but nothing ever read it:
+	// WatchedPaths stayed nil, so the documented "reload when these change"
+	// behaviour did not exist. The shell hook's fast path needs this list to
+	// know when it may skip calling envee at all.
+	if raw, ok := cfg.Env["watch"]; ok {
+		cfg.WatchedPaths = append(cfg.WatchedPaths, strSliceOf(raw)...)
+		delete(cfg.Env, "watch")
+	}
+
 	// Compute canonical hash.
 	cfg.FileHash = canonicalHash(data)
 	cfg.Sources = []SourceFile{{Path: path, Hash: cfg.FileHash}}
@@ -273,6 +285,11 @@ func boolOf(v any) bool {
 }
 
 func strSliceOf(v any) []string {
+	// A single value is accepted where a list is expected, matching how the
+	// file and path directives already behave.
+	if s, ok := v.(string); ok {
+		return []string{s}
+	}
 	if ss, ok := v.([]any); ok {
 		out := make([]string, 0, len(ss))
 		for _, item := range ss {
