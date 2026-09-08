@@ -9,6 +9,21 @@ the curated view.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The fish shell hook set only the first variable.** Command substitution in
+  fish splits output into a list on newlines, and `eval` joins a list with
+  spaces, so the generated statements arrived as one line —
+  `set -gx A 1 set -gx B 2 ...` — and everything after the first variable
+  ended up inside the first one's value. Piping through `string collect`
+  keeps the output a single string.
+
+  The existing test missed this because it fed the eval output to fish through
+  an environment variable, making it a single string: it exercised something
+  shaped like the hook rather than the hook. Hooks are now sourced and invoked
+  as written, against a stand-in binary, for bash, zsh and fish.
+
+
 ## [0.2.0] — 2026-09-08
 
 ### Added
