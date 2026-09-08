@@ -1,0 +1,52 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# Only the deploy job needs write access; the build job stays read-only.
+permissions:
+  contents: read
+
+concurrency:
+  # Never let two deploys race, but let an in-flight one finish rather than
+  # cancelling it mid-publish.
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the custom domain is declared
+        # Without CNAME in the artifact the custom domain is dropped on the
+        # next deploy and the site reverts to github.io.
+        run: |
+          test -f site/CNAME || { echo "site/CNAME is missing"; exit 1; }
+          echo "custom domain: $(cat site/CNAME)"
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
