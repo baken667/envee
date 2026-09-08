@@ -14,6 +14,7 @@ import (
 	"github.com/baken667/envee/internal/log"
 	"github.com/baken667/envee/internal/resolver"
 	"github.com/baken667/envee/internal/shell"
+	"github.com/baken667/envee/internal/trust"
 )
 
 // newEvalCmd creates the `envee eval <shell>` command.
@@ -62,16 +63,24 @@ func runEval(cmd *cobra.Command, shellName string) error {
 		return err
 	}
 
-	// 3. Determine profile: flag > env > config default.
+	// 3. Trust gate (skip if ENVEE_BYPASS_TRUST=1, for tests/CI).
+	if os.Getenv("ENVEE_BYPASS_TRUST") != "1" {
+		store := trust.NewStore()
+		if err := store.CheckFile(cfg.Path, cfg.FileHash); err != nil {
+			return errs.Trust(cfg.Path, cfg.FileHash).WithCause(err)
+		}
+	}
+
+	// 4. Determine profile: flag > env > config default.
 	activeProfile := profile
 	if activeProfile == "" {
 		activeProfile = cfg.Profile
 	}
 
-	// 4. Determine config root (where the resolved config lives).
+	// 5. Determine config root (where the resolved config lives).
 	configRoot := filepath.Dir(cfg.Path)
 
-	// 5. Apply directives.
+	// 6. Apply directives.
 	osEnv := envToMap(os.Environ())
 	result, err := directive.Apply(cmd.Context(), cfg, directive.ApplyOptions{
 		ConfigRoot: configRoot,
