@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/baken667/envee/internal/config"
 )
 
 // newPluginCmd creates the `envee plugin` parent command.
@@ -17,31 +19,34 @@ Plugins are external executables named envee-plugin-<name> that communicate
 with envee via JSON over stdin/stdout (see docs/adr/0007-plugin-protocol.md).`,
 	}
 
+	var listJSON bool
 	list := &cobra.Command{
 		Use:   "list",
 		Short: "List discovered plugins",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("plugin list not yet implemented")
-			return nil
+			return runPluginList(cmd, listJSON)
 		},
 	}
+	list.Flags().BoolVar(&listJSON, "json", false, "machine-readable JSON output")
 
+	var infoJSON bool
 	info := &cobra.Command{
 		Use:   "info <name>",
 		Short: "Show plugin metadata",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("plugin info not yet implemented")
-			return nil
+			return runPluginInfo(cmd, args[0], infoJSON)
 		},
 	}
+	info.Flags().BoolVar(&infoJSON, "json", false, "machine-readable JSON output")
 
 	install := &cobra.Command{
-		Use:   "install <name>",
-		Short: "Install a plugin (via brew or go install)",
+		Use:    "install <name>",
+		Short:  "Install a plugin (via brew or go install)",
+		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("plugin install not yet implemented")
-			return nil
+			return notImplemented("envee plugin install",
+				"Install plugins with your package manager, e.g. `go install github.com/baken667/envee/plugins/env@latest`.")
 		},
 	}
 
@@ -61,30 +66,33 @@ The daemon is optional — envee falls back to standalone mode when the
 daemon is not running.`,
 	}
 
+	var statusJSON bool
 	status := &cobra.Command{
 		Use:   "status",
 		Short: "Check if the daemon is running",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("daemon status not yet implemented")
-			return nil
+			return runDaemonStatus(cmd, statusJSON)
 		},
 	}
+	status.Flags().BoolVar(&statusJSON, "json", false, "machine-readable JSON output")
 
 	start := &cobra.Command{
-		Use:   "start",
-		Short: "Start the daemon in the background",
+		Use:    "start",
+		Short:  "Start the daemon in the background",
+		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("daemon start not yet implemented")
-			return nil
+			return notImplemented("envee daemon start",
+				"Run the daemon directly for now: `enveed &`.")
 		},
 	}
 
 	stop := &cobra.Command{
-		Use:   "stop",
-		Short: "Stop the daemon",
+		Use:    "stop",
+		Short:  "Stop the daemon",
+		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("daemon stop not yet implemented")
-			return nil
+			return notImplemented("envee daemon stop",
+				"Stop it with your process manager, or `pkill enveed`.")
 		},
 	}
 
@@ -93,42 +101,40 @@ daemon is not running.`,
 }
 
 // newTelemetryCmd creates the `envee telemetry` parent command.
+//
+// Telemetry does not exist. The subcommands used to print "telemetry
+// enabled" / "telemetry disabled", which claimed a state change that never
+// happened. The whole tree is hidden until there is something to toggle.
 func newTelemetryCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "telemetry",
-		Short: "Manage opt-in telemetry",
-		Long: `envee can collect anonymous usage events to help prioritize development.
-This is OFF by default. Not implemented yet; nothing is collected.`,
+		Use:    "telemetry",
+		Short:  "Manage opt-in telemetry (not implemented)",
+		Hidden: true,
+		Long: `envee collects no telemetry. This command is a placeholder for a
+future opt-in mechanism; nothing is sent anywhere today.`,
+	}
+
+	notImpl := func(use, short string) *cobra.Command {
+		return &cobra.Command{
+			Use:   use,
+			Short: short,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return notImplemented("envee telemetry "+use,
+					"envee collects no telemetry; there is nothing to configure.")
+			},
+		}
 	}
 
 	status := &cobra.Command{
 		Use:   "status",
 		Short: "Show current telemetry setting",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("telemetry: off (default)")
+			fmt.Println("telemetry: off (envee collects no telemetry)")
 			return nil
 		},
 	}
 
-	enable := &cobra.Command{
-		Use:   "enable",
-		Short: "Enable telemetry (opt-in)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("telemetry enabled (set ENVEE_TELEMETRY=1 in your shell rc)")
-			return nil
-		},
-	}
-
-	disable := &cobra.Command{
-		Use:   "disable",
-		Short: "Disable telemetry",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("telemetry disabled")
-			return nil
-		},
-	}
-
-	cmd.AddCommand(status, enable, disable)
+	cmd.AddCommand(status, notImpl("enable", "Enable telemetry (opt-in)"), notImpl("disable", "Disable telemetry"))
 	return cmd
 }
 
@@ -142,15 +148,18 @@ func newUpgradeCmd() *cobra.Command {
 		Use:   "upgrade",
 		Short: "Upgrade envee.toml schema to the current version",
 		Long: `Migrate an envee.toml file from an older schema to the current one.
-Creates a .backup file by default.`,
-		Args: cobra.MaximumNArgs(1),
+
+Not implemented: there is only one schema version (` + config.SchemaVersion + `),
+so there is nothing to migrate from yet.`,
+		Hidden: true,
+		Args:   cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("upgrade not yet implemented in MVP scaffold")
 			_ = fromVersion
 			_ = toVersion
 			_ = dryRun
 			_ = backup
-			return nil
+			return notImplemented("envee upgrade",
+				"Only schema "+config.SchemaVersion+" exists, so no migration is possible yet.")
 		},
 	}
 	cmd.Flags().StringVar(&fromVersion, "from", "", "explicit source version")

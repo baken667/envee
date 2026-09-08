@@ -37,8 +37,12 @@ func Cache() string {
 }
 
 // Runtime returns the per-user envee runtime directory (UNIX socket, PID file).
+//
+// The "envee" component matters: without it the socket and lock file land
+// directly in the shared runtime directory (on macOS that is
+// ~/Library/Application Support), next to every other application's files.
 func Runtime() string {
-	return xdg.RuntimeDir
+	return filepath.Join(xdg.RuntimeDir, "envee")
 }
 
 // TrustStore returns the directory containing trust entries.

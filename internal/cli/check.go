@@ -33,6 +33,7 @@ to catch common issues:
 // newDoctorCmd creates the `envee doctor` command.
 func newDoctorCmd() *cobra.Command {
 	var fix bool
+	var jsonOut bool
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Run health diagnostics",
@@ -43,12 +44,15 @@ func newDoctorCmd() *cobra.Command {
   - Plugin discovery
   - Daemon status`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("doctor command not yet implemented in MVP scaffold")
-			_ = fix
-			return nil
+			if fix {
+				return notImplemented("envee doctor --fix",
+					"Run `envee doctor` and apply the hints it prints.")
+			}
+			return runDoctor(cmd, jsonOut)
 		},
 	}
-	cmd.Flags().BoolVar(&fix, "fix", false, "auto-fix safe issues")
+	cmd.Flags().BoolVar(&fix, "fix", false, "auto-fix safe issues (not implemented)")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
 	return cmd
 }
 
@@ -61,10 +65,11 @@ func newDebugCmd() *cobra.Command {
 		Long: `Gather a comprehensive diagnostic snapshot (config files, log tail,
 environment summary, version info) into a single file. Share this when
 filing a bug report.`,
+		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("debug command not yet implemented in MVP scaffold")
 			_ = output
-			return nil
+			return notImplemented("envee debug",
+				"Use `envee status`, `envee resolve` and `envee doctor`, or --log-level=debug.")
 		},
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", "", "output file (default: stdout)")

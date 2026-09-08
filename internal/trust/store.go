@@ -17,9 +17,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/baken667/envee/internal/paths"
+	"github.com/baken667/envee/internal/version"
 )
 
 // Status describes the trust state of a file.
@@ -38,8 +40,9 @@ const (
 
 // Entry is a single trust record persisted to disk.
 //
-// Field order is dictated by govet's fieldalignment check: pointers first
-// (8 B), then time.Time (24 B), then strings (16 B), then int (8 B).
+// Fields are ordered widest-first (pointer, time.Time, strings, int) to keep
+// padding down. That is a deliberate choice, not a linter requirement --
+// .golangci.yml disables govet's fieldalignment.
 type Entry struct {
 	Signature   *Sig      `json:"signature,omitempty"`
 	ExpiresAt   time.Time `json:"expires_at,omitempty"`
@@ -83,6 +86,15 @@ func NewStoreAt(root string) *Store {
 //
 // The hash is computed by CanonicalHash.
 func (s *Store) Status(filePath, hash string) (Status, error) {
+	// Deny is keyed by path, not content: denying a file must keep denying it
+	// after an edit. Check it first -- an explicit deny outranks any trust
+	// entry that may also exist for the current content.
+	if denied, err := s.isDenied(filePath); err != nil {
+		return Unknown, err
+	} else if denied {
+		return Denied, nil
+	}
+
 	entryPath := s.entryPath(hash)
 
 	data, err := os.ReadFile(entryPath)
@@ -114,22 +126,51 @@ func (s *Store) Trust(filePath, hash string, ttl time.Duration) error {
 		FilePath:    filePath,
 		TrustedAt:   s.now(),
 		TrustedBy:   currentUser(),
-		ToolVersion: "0.0.0-dev",
+		ToolVersion: version.Version,
 	}
 	if ttl > 0 {
 		entry.ExpiresAt = s.now().Add(ttl)
 	}
+	if err := s.Undeny(filePath); err != nil {
+		return err
+	}
 	return s.writeEntry(hash, entry)
+}
+
+// isDenied reports whether filePath has an explicit deny entry.
+func (s *Store) isDenied(filePath string) (bool, error) {
+	_, err := os.Stat(s.denyPath(filePath))
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+// denyPath returns the path of the deny marker for a config file.
+func (s *Store) denyPath(filePath string) string {
+	return filepath.Join(s.root, "deny", pathHash(filePath)+".json")
 }
 
 // Deny adds a deny entry for the file at filePath.
 func (s *Store) Deny(filePath string) error {
-	pathHash := pathHash(filePath)
-	denyPath := filepath.Join(s.root, "deny", pathHash+".json")
+	denyPath := s.denyPath(filePath)
 	if err := os.MkdirAll(filepath.Dir(denyPath), 0o700); err != nil {
 		return err
 	}
 	return os.WriteFile(denyPath, []byte(filePath+"\n"), 0o600)
+}
+
+// Undeny removes an explicit deny for a file. Trusting a file implies
+// clearing any deny on it, so `envee trust` calls this.
+func (s *Store) Undeny(filePath string) error {
+	err := os.Remove(s.denyPath(filePath))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // Revoke removes the trust entry for a file (does not affect deny).
@@ -140,6 +181,37 @@ func (s *Store) Revoke(hash string) error {
 		return err
 	}
 	return nil
+}
+
+// List returns every entry in the store, ordered by trust time (newest
+// first). A store directory that does not exist yet is not an error -- it
+// simply means nothing has been trusted.
+func (s *Store) List() ([]Entry, error) {
+	dir, err := os.ReadDir(s.root)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read trust store %s: %w", s.root, err)
+	}
+
+	var out []Entry
+	for _, f := range dir {
+		if f.IsDir() || filepath.Ext(f.Name()) != ".json" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(s.root, f.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("read trust entry %s: %w", f.Name(), err)
+		}
+		var e Entry
+		if err := json.Unmarshal(data, &e); err != nil {
+			return nil, fmt.Errorf("parse trust entry %s: %w", f.Name(), err)
+		}
+		out = append(out, e)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].TrustedAt.After(out[j].TrustedAt) })
+	return out, nil
 }
 
 // entryPath returns the path to the trust entry for a given hash.
