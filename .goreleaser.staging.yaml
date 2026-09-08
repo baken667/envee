@@ -120,6 +120,10 @@ brews:
       assert_match version.to_s, shell_output("#{bin}/envee --version")
       assert_match "_envee_hook", shell_output("#{bin}/envee init bash")
       assert_match "add-zsh-hook", shell_output("#{bin}/envee init zsh")
+      # Kept in sync with the production config deliberately. This assertion
+      # was missing here, so the pre-release channel did not exercise the fish
+      # hook -- which is precisely the one that shipped broken in v0.2.0.
+      assert_match "_envee_hook", shell_output("#{bin}/envee init fish")
     dependencies: []
     caveats: |
       ⚠️  STAGING BUILD — this is a pre-release from the staging tap.
