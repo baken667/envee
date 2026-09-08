@@ -136,19 +136,50 @@ func (BashAdapter) Name() Name { return Bash }
 // Init implements Adapter.
 func (BashAdapter) Init(selfPath string) string {
 	const tpl = `# envee shell hook for bash
-# See https://github.com/baken667/envee#shell-integration for details.
-_envee_hook() {
-  local previous_exit_status=$?
+#
+# The hook runs on every prompt, so the common case -- nothing changed -- must
+# cost nothing. It compares the recorded dependency list against a stamp file
+# using only bash builtins: no fork, no subshell, no envee process. Invoking
+# envee costs about 4 ms; these comparisons are below measurement resolution.
+__envee_stamp="${TMPDIR:-/tmp}/envee-stamp.$$"
+__envee_deps=()
+
+_envee_apply() {
   local out
   out="$("{{.SelfPath}}" --quiet eval bash 2>/dev/null)"
-  local rc=$?
-  if [[ $rc -eq 0 && -n "$out" ]]; then
+  if [[ $? -eq 0 && -n "$out" ]]; then
+    __envee_deps=()
     eval "$out"
+    __envee_pwd="$PWD"
+    __envee_ok=1
+    # Truncate rather than touch: a redirection needs no external process.
+    : > "$__envee_stamp"
+  else
+    # Do not arm the fast path on failure. An untrusted directory must keep
+    # retrying, or 'envee trust' would not take effect until the next cd.
+    __envee_ok=
   fi
-  return $previous_exit_status
 }
 
-case ";${PROMPT_COMMAND[*]:-};" in
+_envee_hook() {
+  # Preserve the caller's exit status: this runs from the prompt, and a shell
+  # prompt that displays $? must not be told about envee's internals.
+  local __envee_last=$?
+  if [[ -n "$__envee_ok" && "$PWD" == "$__envee_pwd" ]]; then
+    local f
+    for f in "${__envee_deps[@]}"; do
+      if [[ "$f" -nt "$__envee_stamp" ]]; then
+        _envee_apply
+        return $__envee_last
+      fi
+    done
+    return $__envee_last
+  fi
+  _envee_apply
+  return $__envee_last
+}
+
+case ";${PROMPT_COMMAND:-};" in
   *";_envee_hook;"*) ;;
   *)
     if [[ "$(declare -p PROMPT_COMMAND 2>&1)" == "declare -a"* ]]; then
@@ -200,17 +231,47 @@ func (ZshAdapter) Name() Name { return Zsh }
 // Init implements Adapter.
 func (ZshAdapter) Init(selfPath string) string {
 	const tpl = `# envee shell hook for zsh
-_envee_chpwd() {
+#
+# See the bash hook for why the fast path exists: precmd fires on every
+# prompt, and invoking envee costs about 4 ms.
+__envee_stamp="${TMPDIR:-/tmp}/envee-stamp.$$"
+__envee_deps=()
+
+_envee_apply() {
   local out
   out="$("{{.SelfPath}}" --quiet eval zsh 2>/dev/null)"
-  local rc=$?
-  if [[ $rc -eq 0 && -n "$out" ]]; then
+  if [[ $? -eq 0 && -n "$out" ]]; then
+    __envee_deps=()
     eval "$out"
+    __envee_pwd="$PWD"
+    __envee_ok=1
+    : > "$__envee_stamp"
+  else
+    __envee_ok=
   fi
 }
 
+_envee_chpwd() {
+  # Preserve the caller's exit status: this runs from the prompt, and a shell
+  # prompt that displays $? must not be told about envee's internals.
+  local __envee_last=$?
+  if [[ -n "$__envee_ok" && "$PWD" == "$__envee_pwd" ]]; then
+    local f
+    for f in "${__envee_deps[@]}"; do
+      if [[ "$f" -nt "$__envee_stamp" ]]; then
+        _envee_apply
+        return $__envee_last
+      fi
+    done
+    return $__envee_last
+  fi
+  _envee_apply
+  return $__envee_last
+}
+
 _envee_precmd() {
-  # Trigger on every prompt (for external edits)
+  # Trigger on every prompt (for external edits); the guard above makes that
+  # cheap when nothing has changed.
   _envee_chpwd
 }
 
@@ -260,17 +321,48 @@ func (FishAdapter) Name() Name { return Fish }
 func (FishAdapter) Init(selfPath string) string {
 	return renderInitTemplate(`# envee shell hook for fish
 #
-# `+"`string collect`"+` is load-bearing. Command substitution in fish splits
-# output into a LIST on newlines, and eval joins a list with spaces -- so
-# without it the separate statements arrive as one line,
-# "set -gx A 1 set -gx B 2 ...", and every variable after the first lands in
-# the first one's value. string collect keeps the output as a single string
-# with its newlines intact.
-function _envee_hook --on-variable PWD
+# The hook fires on every prompt, so the common case -- nothing changed --
+# must cost nothing. It compares the recorded dependency list against a stamp
+# file using only fish builtins; invoking envee costs about 4 ms.
+#
+# 'string collect' below is load-bearing: command substitution in fish splits
+# output into a LIST on newlines, and eval joins a list with spaces, so
+# without it the generated statements arrive as one line and every variable
+# after the first lands in the first one's value.
+set -g __envee_stamp (test -n "$TMPDIR"; and echo $TMPDIR; or echo /tmp)/envee-stamp.(echo %self)
+set -g __envee_deps
+
+function _envee_apply
   set -l out ("{{.SelfPath}}" --quiet eval fish 2>/dev/null | string collect)
   if test $status -eq 0 -a -n "$out"
+    set -g __envee_deps
     eval $out
+    set -g __envee_pwd $PWD
+    set -g __envee_ok 1
+    # Truncate rather than touch: no external process.
+    echo -n "" > $__envee_stamp
+  else
+    # Do not arm the fast path on failure, or 'envee trust' would not take
+    # effect until the next directory change.
+    set -e __envee_ok
   end
+end
+
+function _envee_hook --on-variable PWD
+  # Preserve the caller's exit status: this runs from the prompt, and a prompt
+  # that displays $status must not be told about envee's internals.
+  set -l __envee_last $status
+  if set -q __envee_ok; and test "$PWD" = "$__envee_pwd"
+    for f in $__envee_deps
+      if test "$f" -nt "$__envee_stamp"
+        _envee_apply
+        return $__envee_last
+      end
+    end
+    return $__envee_last
+  end
+  _envee_apply
+  return $__envee_last
 end
 
 function _envee_prompt --on-event fish_prompt
@@ -455,6 +547,57 @@ func (NuAdapter) RenderDiff(set map[string]string, unset []string) string {
 		return ""
 	}
 	return string(out) + "\n"
+}
+
+// FastPathRenderer is an optional Adapter capability: emitting the state a
+// shell hook needs to decide it can skip invoking envee entirely.
+//
+// The hook compares the recorded dependency list against a stamp file using
+// the shell's own builtins, which costs nothing measurable (see the timings in
+// the fast-path tests). Adapters that do not implement this keep the previous
+// behaviour of invoking envee on every prompt.
+type FastPathRenderer interface {
+	// RenderFastPath emits shell code recording which files the resolved
+	// environment depends on. deps are absolute paths.
+	RenderFastPath(deps []string) string
+}
+
+// depsVar is the shell variable the generated hooks read.
+const depsVar = "__envee_deps"
+
+// RenderFastPath implements FastPathRenderer.
+func (BashAdapter) RenderFastPath(deps []string) string {
+	return posixDepsAssignment(deps)
+}
+
+// RenderFastPath implements FastPathRenderer.
+func (ZshAdapter) RenderFastPath(deps []string) string {
+	return posixDepsAssignment(deps)
+}
+
+// posixDepsAssignment renders a bash/zsh array assignment.
+//
+// Every path goes through the same escaping as a variable value: these are
+// filesystem paths, which routinely contain spaces and can contain quotes and
+// newlines, and they are about to be evaluated as shell code.
+func posixDepsAssignment(deps []string) string {
+	escaped := make([]string, len(deps))
+	for i, d := range deps {
+		escaped[i] = BashEscape(d)
+	}
+	return depsVar + "=(" + strings.Join(escaped, " ") + ");\n"
+}
+
+// RenderFastPath implements FastPathRenderer.
+func (FishAdapter) RenderFastPath(deps []string) string {
+	if len(deps) == 0 {
+		return "set -g " + depsVar + "\n"
+	}
+	escaped := make([]string, len(deps))
+	for i, d := range deps {
+		escaped[i] = FishEscape(d)
+	}
+	return "set -g " + depsVar + " " + strings.Join(escaped, " ") + "\n"
 }
 
 // ---- pwsh (PowerShell) adapter ---------------------------------------------

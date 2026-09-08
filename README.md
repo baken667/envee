@@ -30,7 +30,7 @@ echo $DATABASE_URL     # env vars are loaded automatically
 | Redaction | none | `redact = true` | **`redact = true` by default for secrets** |
 | Secret plugins | none | none | **exec-based, 1Password/AWS/Vault/local** |
 | Script sandbox | none (RCE) | none | **WASM (wazero) — planned, not implemented** |
-| Shell hook overhead | ~5–15ms | ~5ms | **< 0.5ms (stat only) + lazy eval** |
+| Shell hook overhead | ~5–15ms | ~5ms | **~0ms when nothing changed** (shell builtins only) |
 | Cross-platform (macOS/Linux) | ✅ | ✅ | **✅ single static binary (5 MB)** |
 | Homebrew distribution | ✅ homebrew-core | ✅ homebrew-core | **✅ custom tap, auto-publish via GoReleaser** |
 

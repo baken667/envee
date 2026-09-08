@@ -105,6 +105,14 @@ func runEval(cmd *cobra.Command, shellName string) error {
 	// 6. Compute diff vs OS env, considering PATH specially.
 	shellAdapter := shellAdapter(shellName)
 	output := renderShellDiff(shellAdapter, result, osEnv)
+
+	// 7. Record what this result depends on, so the hook can skip calling us
+	// again until something actually changes. Adapters that do not support
+	// this emit nothing and keep being invoked on every prompt.
+	if fp, ok := shellAdapter.(shell.FastPathRenderer); ok {
+		output += fp.RenderFastPath(evalDeps(cfg, cwd))
+	}
+
 	fmt.Print(output)
 	return nil
 }

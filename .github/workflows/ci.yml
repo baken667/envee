@@ -175,7 +175,7 @@ jobs:
           for sh in bash zsh fish nu pwsh; do
             command -v "$sh" >/dev/null || { echo "$sh is not installed; the hook tests would silently skip"; exit 1; }
           done
-          go test ./internal/shell/ -run 'TestNuInit|TestPwshInit|TestHookApplies|TestFishHook' -v
+          go test ./internal/shell/ -run 'TestNuInit|TestPwshInit|TestHookApplies|TestFishHook|TestFastPath|TestRenderFastPath|TestHookPreserves' -v
 
   # ---- Lint -----------------------------------------------------------------
 
