@@ -95,29 +95,29 @@ jobs:
             -ldflags="-s -w -X github.com/baken667/envee/internal/version.Version=ci" \
             -o ./bin/enveed ./cmd/enveed
 
-      - name: Smoke: --version
+      - name: Smoke version
         run: ./bin/envee --version
 
-      - name: Smoke: --help
+      - name: Smoke help
         run: ./bin/envee --help
 
-      - name: Smoke: init bash
+      - name: Smoke init bash
         run: |
           out=$(./bin/envee init bash)
           echo "$out" | grep -q "_envee_hook" || (echo "missing hook"; exit 1)
           echo "$out" | grep -q "PROMPT_COMMAND" || (echo "missing PROMPT_COMMAND"; exit 1)
 
-      - name: Smoke: init zsh
+      - name: Smoke init zsh
         run: |
           out=$(./bin/envee init zsh)
           echo "$out" | grep -q "add-zsh-hook" || (echo "missing add-zsh-hook"; exit 1)
 
-      - name: Smoke: init fish
+      - name: Smoke init fish
         run: |
           out=$(./bin/envee init fish)
           echo "$out" | grep -q "function _envee_hook" || (echo "missing fish hook"; exit 1)
 
-      - name: Smoke: discover config
+      - name: Smoke discover config
         working-directory: ./examples/basic
         run: |
           ../../bin/envee --config envee.toml check || true
