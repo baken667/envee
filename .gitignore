@@ -38,6 +38,11 @@ _research/
 vendor/
 glide.iml
 
+# Generated docs (produced by ./cmd/gen-docs, emitted at release time by a
+# goreleaser before-hook -- not committed).
+/completions/
+/manpages/
+
 # Goreleaser
 .goreleaser.yml.local
 Untitled

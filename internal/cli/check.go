@@ -22,10 +22,7 @@ to catch common issues:
   - Suspicious patterns (e.g., redact=false on a variable named *_KEY)`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println("check command not yet implemented in MVP scaffold")
-			_ = strict
-			_ = jsonOut
-			return nil
+			return runCheck(cmd, args, strict, jsonOut)
 		},
 	}
 	cmd.Flags().BoolVar(&strict, "strict", false, "treat warnings as errors")
