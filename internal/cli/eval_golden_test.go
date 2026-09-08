@@ -165,8 +165,13 @@ func resolveConfigDir(t *testing.T, rel string) string {
 // Any sub-path under configDir (e.g. ".../examples/monorepo/services/api/foo")
 // is preserved verbatim — only the prefix is rewritten.
 func normalizePath(s, configDir, placeholder string) string {
-	// Replace any occurrence of the absolute configDir prefix with the
-	// placeholder. Walk the configDir from longest to shortest so that
-	// nested paths are replaced at the deepest level first.
-	return strings.ReplaceAll(s, configDir, placeholder)
+	// Separators are normalised to "/" first so the expectations below can be
+	// written once. On Windows the _.path entries come back from filepath.Join
+	// with backslashes while the literal parts of a template keep the forward
+	// slashes the config author wrote, so the raw output mixes both.
+	//
+	// This is a test-only convenience: it also rewrites any backslash that is
+	// part of shell escaping, which none of the golden fixtures rely on.
+	s = filepath.ToSlash(s)
+	return strings.ReplaceAll(s, filepath.ToSlash(configDir), placeholder)
 }
