@@ -104,7 +104,6 @@ func TestQuoteFilter(t *testing.T) {
 
 func TestDirnameBasename(t *testing.T) {
 	e := New()
-	ctx := &Context{Env: map[string]string{}, OSEnv: map[string]string{}}
 	got, err := e.Render("{{config_root | dirname}}", &Context{ConfigRoot: "/a/b/c"})
 	if err != nil {
 		t.Fatal(err)
@@ -116,5 +115,4 @@ func TestDirnameBasename(t *testing.T) {
 	if got != "c" {
 		t.Errorf("basename = %q, want c", got)
 	}
-	_ = ctx
 }

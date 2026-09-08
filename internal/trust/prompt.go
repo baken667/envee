@@ -39,19 +39,22 @@ func (r Response) String() string {
 }
 
 // PromptOptions configures the trust prompt.
+//
+// Field order is dictated by govet's fieldalignment check: interfaces first
+// (16 B), then strings (16 B), then int (8 B), then bools (1 B each).
 type PromptOptions struct {
+	// Reader is the input source (default: os.Stdin).
+	Reader io.Reader
+
+	// Writer is the output destination for prompts (default: os.Stderr).
+	Writer io.Writer
+
 	// Question is the prompt string (e.g., "Trust this file? [Y/n/d/s/q]").
 	Question string
 
 	// Default is the response to use when the user just hits Enter.
 	// Defaults to ResponseGrant if zero.
 	Default Response
-
-	// Reader is the input source (default: os.Stdin).
-	Reader io.Reader
-
-	// Writer is the output destination for prompts (default: os.Stderr).
-	Writer io.Writer
 
 	// Yes auto-grants without prompting.
 	Yes bool

@@ -86,8 +86,8 @@ func runTrust(cmd *cobra.Command, args []string, sign bool, keyPath, ttlStr stri
 		if err != nil {
 			return err
 		}
-		if err := store.Revoke(cfg.FileHash); err != nil {
-			return err
+		if revErr := store.Revoke(cfg.FileHash); revErr != nil {
+			return revErr
 		}
 		fmt.Fprintf(os.Stderr, "[envee] trust revoked for %s (hash %s)\n", target, cfg.FileHash)
 		return nil
@@ -105,13 +105,13 @@ func runTrust(cmd *cobra.Command, args []string, sign bool, keyPath, ttlStr stri
 
 	// Interactive prompt.
 	if !yes && !sign {
-		resp, err := trust.Prompt(trust.PromptOptions{
+		resp, promptErr := trust.Prompt(trust.PromptOptions{
 			Question: "Trust this file? [Y/n/d(iff)/s(kip)/q(uit)] ",
 			Default:  trust.ResponseGrant,
 			Yes:      false,
 		})
-		if err != nil {
-			return err
+		if promptErr != nil {
+			return promptErr
 		}
 		switch resp {
 		case trust.ResponseGrant:

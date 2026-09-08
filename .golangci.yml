@@ -44,4 +44,11 @@ linters-settings:
     checks: ["all", "-SA1019"]
 
   govet:
+    # Enable all standard govet analyzers except `fieldalignment`,
+    # which is a micro-optimization hint (re-order struct fields by size
+    # to save a few bytes of padding). It's noisy, subjective, and
+    # orthogonal to correctness — many Go codebases leave structs in
+    # logical (declaration-order) layout.
     enable-all: true
+    disable:
+      - fieldalignment
