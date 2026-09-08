@@ -36,6 +36,19 @@ the curated view.
 
 ### Fixed
 
+- **The `.env` parser looped forever** when an `export FOO=bar` line was not
+  the first line of the file: the scan for the first non-space character after
+  `export` used a literal offset instead of one relative to the current
+  position, sending the scanner backwards. Since `envee eval` runs from the
+  shell hook on every prompt, that hung the shell — on a completely ordinary
+  `.env`.
+- CRLF line endings corrupted every value read from a `.env`: the parser
+  recognised only `\n`, so each value kept a trailing carriage return and each
+  blank line produced a variable literally named `"\r"`.
+- Plugin discovery found nothing on Windows — it gated on the Unix execute
+  bit, and the plugin name was derived by scanning for `/` without stripping
+  the executable extension, so a plugin would have been called `op.exe` and
+  never matched a config's `source = "op"`.
 - Config discovery walked up two directory levels per iteration, so
   `envee.toml` in the immediate parent was never found — the monorepo layout
   in the README could not work.
