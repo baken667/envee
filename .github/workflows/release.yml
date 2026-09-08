@@ -50,7 +50,7 @@ jobs:
         # v5 of the action installs GoReleaser v1.x, which matches the
         # v1.x schema in .goreleaser.yaml. Upgrading to the v6 action
         # would force a migration to homebrew_casks (cask DSL) — see
-        # docs/adr/0014-homebrew-pipeline.md for why we stick with
+        # docs/adr/0014-homebrew-distribution.md for why we stick with
         # the formula DSL.
         uses: goreleaser/goreleaser-action@v5
         with:

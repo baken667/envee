@@ -85,6 +85,47 @@ type SourceFile struct {
 	Hash string
 }
 
+// SecretRefs returns every secret this config declares, merging the two
+// supported spellings:
+//
+//	[env._.secret.DB_PASSWORD]      -> Directives.Secret
+//	DB_PASSWORD = { source = ... }  -> shorthand under [env]
+//
+// directive.Apply lifts the shorthand at eval time, but Parse does not, so
+// anything inspecting a parsed Config (the trust summary, `envee check`) has
+// to go through here or it silently misses every shorthand secret -- which
+// for the trust prompt means not telling the user that approving the config
+// lets it invoke a secret plugin.
+func (c *Config) SecretRefs() map[string]SecretRef {
+	out := make(map[string]SecretRef)
+	if c.Directives != nil {
+		for k, v := range c.Directives.Secret {
+			out[k] = v
+		}
+	}
+	for k, v := range c.Env {
+		if k == "_" {
+			continue
+		}
+		m, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		src, _ := m["source"].(string)
+		if src == "" {
+			continue
+		}
+		if _, already := out[k]; already {
+			continue
+		}
+		ref, _ := m["ref"].(string)
+		redact, _ := m["redact"].(bool)
+		required, _ := m["required"].(bool)
+		out[k] = SecretRef{Source: src, Ref: ref, Redact: redact, Required: required}
+	}
+	return out
+}
+
 // Profile is a per-profile overlay of env variables and metadata.
 type Profile struct {
 	// Extends is the list of other profiles to load before this one
@@ -200,7 +241,7 @@ type SecretRef struct {
 // SourceRef is a single _.source directive.
 type SourceRef struct {
 	Path   string `toml:"path"`
-	Shell  string `toml:"shell"`  // "bash" (default), "sh"
+	Shell  string `toml:"shell"` // "bash" (default), "sh"
 	Redact bool   `toml:"redact"`
 }
 

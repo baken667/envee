@@ -321,7 +321,7 @@ func (NuAdapter) Name() Name { return Nu }
 
 // Init implements Adapter.
 func (NuAdapter) Init(selfPath string) string {
-	return renderInitFormat(`# envee shell hook for nushell
+	return renderInitTemplate(`# envee shell hook for nushell
 $env.ENVEE_HOOK = {|
   let out = (^"{{.SelfPath}}" --quiet eval nu | complete)
   if $out.exit_code == 0 and ($out.stdout | str length) > 0 {
@@ -399,7 +399,7 @@ func (PwshAdapter) Name() Name { return Pwsh }
 
 // Init implements Adapter.
 func (PwshAdapter) Init(selfPath string) string {
-	return renderInitFormat(`# envee shell hook for PowerShell
+	return renderInitTemplate(`# envee shell hook for PowerShell
 function _envee_hook {
   $previous = $?
   $out = & "{{.SelfPath}}" --quiet eval pwsh 2>$null
@@ -455,7 +455,3 @@ func PwshEscape(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
-// renderInitFormat is a fmt.Sprintf variant that only does {{.SelfPath}}.
-func renderInitFormat(tpl, selfPath string) string {
-	return renderInitTemplate(tpl, selfPath)
-}

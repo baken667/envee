@@ -8,11 +8,15 @@ DAEMON_BINARY   := enveed
 VERSION         ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-dev")
 COMMIT          ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE            ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+# NOTE: the import path here must match the module path in go.mod exactly.
+# Go silently ignores -X for a symbol it cannot find, so a typo here does not
+# fail the build -- it just produces a binary that reports 0.0.0-dev.
+MODULE          := github.com/baken667/envee
 LDFLAGS         := -s -w \
-                   -X github.com/baken/envee/internal/version.Version=$(VERSION) \
-                   -X github.com/baken/envee/internal/version.Commit=$(COMMIT) \
-                   -X github.com/baken/envee/internal/version.Date=$(DATE) \
-                   -X github.com/baken/envee/internal/version.GoVersion=$(shell go version | cut -d' ' -f3)
+                   -X $(MODULE)/internal/version.Version=$(VERSION) \
+                   -X $(MODULE)/internal/version.Commit=$(COMMIT) \
+                   -X $(MODULE)/internal/version.Date=$(DATE) \
+                   -X $(MODULE)/internal/version.GoVersion=$(shell go version | cut -d' ' -f3)
 
 # Directories
 CMD_DIR         := ./cmd/$(BINARY)
@@ -31,7 +35,7 @@ CGO_ENABLED     ?= 0
 # ---- Targets ----------------------------------------------------------------
 
 .PHONY: help all build build-daemon install test test-race test-coverage lint fmt vet \
-        clean docs docs-check completions manpages run run-debug \
+        clean docs completions manpages run run-debug \
         goreleaser-check goreleaser-snapshot release-snapshot \
         homebrew-tap-test examples
 
@@ -96,10 +100,6 @@ manpages: ## Generate man pages.
 	@mkdir -p manpages
 	@$(GO) run ./cmd/gen-docs man --output manpages/
 
-docs-check: ## Verify generated docs are up-to-date.
-	@$(GO) run ./cmd/gen-docs completions --output completions/ --check
-	@$(GO) run ./cmd/gen-docs man --output manpages/ --check
-
 # --- Run ---
 
 run: build ## Run envee with default args.
@@ -116,7 +116,7 @@ goreleaser-check: ## Verify goreleaser config.
 
 release-snapshot: ## Build a local snapshot release (no publish).
 	@command -v goreleaser >/dev/null || { echo "goreleaser not installed"; exit 1; }
-	goreleaser release --snapshot --clean --skip publish --skip announce
+	goreleaser release --snapshot --clean --skip=sign,publish,announce
 
 goreleaser-snapshot: goreleaser-check release-snapshot
 
@@ -124,14 +124,14 @@ goreleaser-snapshot: goreleaser-check release-snapshot
 
 homebrew-tap-test: ## Test the Homebrew formula locally.
 	@command -v brew >/dev/null || { echo "brew not installed"; exit 1; }
-	brew audit --strict --new ../homebrew-tap/Formula/envee.rb
+	brew audit --strict --online --formula ../homebrew-tap/Formula/envee.rb
 
 # --- Examples ---
 
 examples: ## Verify examples parse correctly.
 	@for f in examples/*/envee.toml; do \
 		echo "Checking $$f..."; \
-		$(GO) run $(CMD_DIR) check --config $$f || exit 1; \
+		$(GO) run $(CMD_DIR) check "$$f" || exit 1; \
 	done
 
 # --- Cleanup ---

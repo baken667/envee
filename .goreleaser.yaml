@@ -7,7 +7,7 @@
 # Uses GoReleaser v1.x schema (matches goreleaser/goreleaser-action@v5).
 # Upgrading to the v6 action (GoReleaser v2.x) would force a migration to
 # homebrew_casks (cask DSL); we keep the formula DSL for a familiar
-# `brew install baken667/tap/envee` UX. See docs/adr/0014-homebrew-pipeline.md.
+# `brew install baken667/tap/envee` UX. See docs/adr/0014-homebrew-distribution.md.
 version: 1
 
 project_name: envee
@@ -79,7 +79,7 @@ archives:
       - envee
       - enveed
     # The enveed daemon is not built for windows (Linux/macOS only
-    # for now — see docs/adr/0003-naming.md / 0012-cross-platform.md).
+    # for now — see docs/adr/0003-naming-files.md / 0012-cross-platform.md).
     # Without this flag, goreleaser refuses to package archives that
     # have a different number of binaries per platform.
     allow_different_binary_count: true

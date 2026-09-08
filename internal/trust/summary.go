@@ -3,6 +3,7 @@ package trust
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/baken667/envee/internal/config"
@@ -10,8 +11,9 @@ import (
 
 // Summary is a human-readable description of what trusting a config file enables.
 //
-// Field order is dictated by govet's fieldalignment check: slices first
-// (24 B), then strings (16 B), then int (8 B).
+// Fields are ordered widest-first (slices, then strings, then int) to keep
+// padding down. This is a deliberate choice, not a linter requirement --
+// .golangci.yml disables govet's fieldalignment check.
 type Summary struct {
 	EnvVars      []string
 	RedactedVars []string
@@ -42,10 +44,15 @@ func BuildSummary(cfg *config.Config) *Summary {
 		s.PathAdds = append(s.PathAdds, pathStrings(cfg.Directives.Path)...)
 		s.Files = append(s.Files, fileStrings(cfg.Directives.File)...)
 		s.Scripts = len(cfg.Directives.Script)
-		for name, ref := range cfg.Directives.Secret {
-			s.Secrets = append(s.Secrets, fmt.Sprintf("%s://%s (source=%s)", name, ref.Ref, ref.Source))
-		}
 	}
+
+	// Use SecretRefs so the prompt also lists secrets written in the
+	// shorthand form. Without it the user was never shown that approving
+	// this config lets it call a secret plugin.
+	for name, ref := range cfg.SecretRefs() {
+		s.Secrets = append(s.Secrets, fmt.Sprintf("%s = %s://%s", name, ref.Source, ref.Ref))
+	}
+	sort.Strings(s.Secrets)
 
 	for k, v := range cfg.Env {
 		if k == "_" || isMetaKey(k) {
