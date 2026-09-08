@@ -151,6 +151,13 @@ func ExeName(source string) string {
 }
 
 // discoverFromPath walks PATH and finds any envee-plugin-* binaries.
+// DiscoverPaths returns the absolute paths of every executable named
+// envee-plugin-* on $PATH, without running any of them.
+func DiscoverPaths() []string { return discoverFromPath() }
+
+// PluginName extracts "foo" from "/path/to/envee-plugin-foo".
+func PluginName(path string) string { return pluginNameFromPath(path) }
+
 func discoverFromPath() []string {
 	var found []string
 	pathDirs := filepath.SplitList(os.Getenv("PATH"))
