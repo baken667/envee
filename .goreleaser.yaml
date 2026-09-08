@@ -106,7 +106,7 @@ nfpms:
       - apk
     maintainer: "Bauyrzhan Akhmetov <baken667@users.noreply.github.com>"
     description: "Per-directory environment variable manager"
-    homepage: "https://github.com/baken667/envee"
+    homepage: "https://envee.bkn.wtf"
     license: "MIT"
     dependencies:
       - bash
@@ -133,7 +133,7 @@ brews:
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: "https://github.com/baken667/envee"
+    homepage: "https://envee.bkn.wtf"
     description: "Per-directory environment variable manager"
     license: "MIT"
     # NOTE: in goreleaser v1 `brews.ids` filters ARCHIVE ids, not build ids.
