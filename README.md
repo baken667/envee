@@ -4,10 +4,10 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go 1.24+](https://img.shields.io/badge/Go-1.24+-blue.svg)](go.mod)
-[![Homebrew](https://img.shields.io/badge/Homebrew-baken%2Ftap-orange.svg)](https://github.com/baken/homebrew-tap)
+[![Homebrew](https://img.shields.io/badge/Homebrew-baken667%2Ftap-orange.svg)](https://github.com/baken667/homebrew-tap)
 
 ```bash
-# 1. Install
+# 1. Install (Homebrew, after first release)
 brew install baken667/tap/envee
 
 # 2. Add the shell hook
@@ -21,20 +21,18 @@ echo $DATABASE_URL     # env vars are loaded automatically
 
 ## Why envee?
 
-| Feature | direnv | envee |
-|---|---|---|
-| Config format | bash script (`.envrc`) | structured TOML (`envee.toml`) |
-| Trust model | hash + opt signature | hash + opt signature + static analysis |
-| Shell escape safety | manual `$VAR` handling | automatic, audited |
-| Profiles (dev/staging/prod) | manual `source_env` | first-class `[profiles.X]` |
-| Required vars | none | `required = true` validation |
-| Redaction | none | `redact = true` by default |
-| Secret manager integration | none | plugin-based (1Password, AWS, Vault, ...) |
-| Script sandbox | none (RCE) | optional WASM (wazero) |
-| Shell hook overhead | ~5–15 ms per prompt | < 0.5 ms (stat only) + lazy eval |
-| Built-in commands | ~25 | ~25 (compatible) |
-| Cross-platform (macOS/Linux) | ✅ | ✅ (single static binary) |
-| Homebrew distribution | ✅ (homebrew-core) | ✅ (custom tap, auto-updated by GoReleaser) |
+| Feature | direnv | mise | **envee** |
+|---|---|---|---|
+| Config format | bash (`.envrc`) | TOML | **TOML (`envee.toml`)** |
+| Trust model | hash | hash | **hash + signature + static analysis** |
+| Profiles (dev/staging/prod) | manual `source_env` | `MISE_ENV=dev` | **first-class `[profiles.X]`** |
+| Required vars | none | `required = true` | **`required = true` per profile** |
+| Redaction | none | `redact = true` | **`redact = true` by default for secrets** |
+| Secret plugins | none | none | **exec-based, 1Password/AWS/Vault/local** |
+| Script sandbox | none (RCE) | none | **WASM (wazero) — Phase 3** |
+| Shell hook overhead | ~5–15ms | ~5ms | **< 0.5ms (stat only) + lazy eval** |
+| Cross-platform (macOS/Linux) | ✅ | ✅ | **✅ single static binary (5 MB)** |
+| Homebrew distribution | ✅ homebrew-core | ✅ homebrew-core | **✅ custom tap, auto-publish via GoReleaser** |
 
 See [docs/adr/](docs/adr/) for the full architecture decision log (18 ADRs).
 
@@ -43,10 +41,10 @@ See [docs/adr/](docs/adr/) for the full architecture decision log (18 ADRs).
 ### Install
 
 ```bash
-# Homebrew (recommended)
+# Homebrew (recommended, after first release)
 brew install baken667/tap/envee
 
-# Go install
+# Go install (any platform)
 go install github.com/baken667/envee/cmd/envee@latest
 
 # Direct download — see https://github.com/baken667/envee/releases
@@ -84,49 +82,110 @@ _.file = ".env"
 
 # Redact secrets in `envee status`
 DATABASE_PASSWORD = { value = "dev", redact = true }
+
+# Resolve a secret via a plugin (envee-plugin-env)
+GITHUB_TOKEN = { source = "env", ref = "GITHUB_TOKEN", redact = true }
 ```
+
+### Manage local secrets
+
+```bash
+$ envee secret set DATABASE_PASSWORD=hunter2
+$ envee secret set GITHUB_TOKEN=ghp_xxxxxxxxxxxx
+$ envee secret list
+DATABASE_PASSWORD=***REDACTED***
+GITHUB_TOKEN=***REDACTED***
+```
+
+Stored in `~/.local/share/envee/secrets/env.json` (mode 0600).
 
 ### Trust the project
 
 ```bash
 $ cd ~/work/myproj
 $ envee trust
-[envee] Reviewing envee.toml...
-[envee]   4 env vars
-[envee]   1 PATH addition
-[envee]   0 secret sources
-[envee] Trust this file? [Y/n/d(iff)] Y
+[envee] Trust envee.toml at /Users/alice/work/myproj
+  Schema:     envee/v1
+  Profile:    dev
+  Hash:       sha256:abc123...
+
+  Env vars:   5 (2 marked redact)
+  PATH adds:  2
+  Files:      1
+
+Trust this file? [Y/n/d(iff)/s(kip)/q(uit)] y
 Trusted.
   hash:    sha256:abc123...
+  expires: never
 ```
 
 Now every time you `cd` into this project, the env vars are automatically loaded into your shell.
 
+## Commands
+
+| Command | Description |
+|---|---|
+| `envee init <shell>` | Output shell hook code |
+| `envee trust [path]` | Approve an `envee.toml` (interactive) |
+| `envee deny [path]` | Block an `envee.toml` |
+| `envee status` | Show current state and resolved env |
+| `envee resolve` | Compute and print the resolved environment (text or JSON) |
+| `envee eval <shell>` | Print shell-specific export/unset commands (used by hook) |
+| `envee diff <shell>` | Preview env changes without applying |
+| `envee exec -- <cmd>` | Run a command with the loaded env |
+| `envee check` | Static analysis of `envee.toml` |
+| `envee secret set/unset/list/get` | Manage the local `envee-plugin-env` store |
+| `envee doctor` | Health diagnostics |
+| `envee plugin list/info/install` | Manage plugins |
+| `envee daemon status/start/stop` | Manage the optional `enveed` daemon |
+| `envee version` | Show envee version |
+
+## Plugins
+
+`envee` resolves secrets through a plugin protocol. A plugin is an executable
+named `envee-plugin-<name>` in your `$PATH` that responds to `metadata` and
+`resolve` subcommands over JSON-over-stdio.
+
+Shipped:
+
+| Plugin | Source |
+|---|---|
+| `envee-plugin-env` | Local key-value store (`envee secret set KEY=VAL`) |
+| `envee-plugin-op` | (Phase 3) 1Password CLI |
+| `envee-plugin-aws` | (Phase 3) AWS Secrets Manager / SSO |
+| `envee-plugin-vault` | (Phase 3) HashiCorp Vault |
+| `envee-plugin-sops` | (Phase 3) Mozilla SOPS |
+
+Write your own plugin in 30 lines using [`pkg/sdk-go`](pkg/sdk-go/).
+
 ## Documentation
 
-- [Architecture Decision Records](docs/adr/README.md) — 18 ADRs covering language, config format, trust, hooks, plugins, daemon, secrets, etc.
-- [PLAN.md](PLAN.md) — high-level project plan with competitive analysis
+- [PLAN.md](PLAN.md) — high-level competitive analysis
+- [ROADMAP.md](ROADMAP.md) — A/B/C implementation plan
+- [docs/adr/](docs/adr/) — 18 Architecture Decision Records
 - [examples/](examples/) — example projects
 
 ## Project status
 
-**Pre-1.0 / MVP scaffold.** See [docs/adr/0015-versioning.md](docs/adr/0015-versioning.md) for the versioning policy.
+**Pre-1.0 / MVP complete.** All three planned milestones (eval, trust, plugins) are implemented and tested.
 
-The architecture is in place; the core algorithms (env diff, TOML parsing, template engine, trust store, plugin protocol) are written, and the project builds to a 7 MB static binary. Subcommands are scaffolded; business logic is being filled in incrementally.
-
-```bash
-$ envee --version
-0.0.0-dev (commit unknown, built unknown, go1.27.0)
-
-$ envee --help
-envee loads environment variables from envee.toml when you enter a directory.
-...
+```
+8 packages with tests, all green:
+  internal/cli         (eval, resolve, status, trust, secret, init, ...)
+  internal/config      (TOML parser, profile flattening)
+  internal/directive   (Apply orchestrator: file, path, profile, secret, template)
+  internal/dotenv      (.env parser, hand-written state machine)
+  internal/env         (Map type, diff, merge)
+  internal/plugin      (exec-based plugin dispatcher)
+  internal/shell       (bash/zsh/fish/nu/pwsh adapters, escape)
+  internal/template    (Jinja-lite, cycle detection)
+  internal/trust       (XDG_DATA_HOME store, summary, prompt)
 ```
 
 ## Development
 
 ```bash
-make build            # build ./bin/envee
+make build            # build ./bin/envee (and ./bin/enveed)
 make test             # run unit tests
 make test-race        # run with race detector
 make lint             # golangci-lint

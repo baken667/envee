@@ -25,16 +25,17 @@ _.file = [
   { path = ".env.local", redact = true, required = false },
 ]
 
-# API-specific secrets.
-DATABASE_URL = { source = "op", ref = "op://Dev/Api-DB/url", redact = true, required = true }
-REDIS_URL = { source = "op", ref = "op://Dev/Redis/url", redact = true }
+# API-specific secrets (uses local env store by default;
+# in production you'd switch to 1Password or AWS).
+DATABASE_URL = { source = "env", ref = "API_DATABASE_URL", redact = true, required = true }
+REDIS_URL = { source = "env", ref = "API_REDIS_URL", redact = true }
 
 # Per-profile overlay.
 [profiles.staging]
-DATABASE_URL = { source = "op", ref = "op://Staging/Api-DB/url", redact = true, required = true }
+DATABASE_URL = { source = "env", ref = "STAGING_API_DATABASE_URL", redact = true, required = true }
 LOG_LEVEL = "info"
 
 [profiles.prod]
-DATABASE_URL = { source = "op", ref = "op://Production/Api-DB/url", redact = true, required = true }
+DATABASE_URL = { source = "env", ref = "PROD_API_DATABASE_URL", redact = true, required = true }
 LOG_LEVEL = "warn"
 required = ["DATABASE_URL", "REDIS_URL", "STRIPE_API_KEY"]
