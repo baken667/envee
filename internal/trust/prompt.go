@@ -97,16 +97,16 @@ func Prompt(opts PromptOptions) (Response, error) {
 		return opts.Default, nil
 	}
 
-	switch {
-	case line == "y" || line == "yes":
+	switch line {
+	case "y", "yes":
 		return ResponseGrant, nil
-	case line == "n" || line == "no":
+	case "n", "no":
 		return ResponseDeny, nil
-	case line == "d" || line == "diff":
+	case "d", "diff":
 		return ResponseShowDiff, nil
-	case line == "s" || line == "skip":
+	case "s", "skip":
 		return ResponseSkip, nil
-	case line == "q" || line == "quit":
+	case "q", "quit":
 		return ResponseQuit, nil
 	}
 	// Unrecognized — treat as default.

@@ -68,11 +68,11 @@ func parse(data string, expand bool) (map[string]string, error) {
 	out := make(map[string]string)
 
 	var (
-		st          state = stateStart
-		key         strings.Builder
-		value       strings.Builder
-		curLine     int = 1
-		statementLine int = 1
+		st            state = stateStart
+		key           strings.Builder
+		value         strings.Builder
+		curLine       = 1
+		statementLine = 1
 	)
 
 	flush := func() {

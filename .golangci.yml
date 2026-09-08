@@ -1,0 +1,47 @@
+# golangci-lint configuration for envee.
+#
+# Defaults are kept intentionally close to upstream so we get the same
+# linter set the CI workflow uses (golangci/golangci-lint-action@v6 with
+# version: latest, which pulls the latest stable v1 release).
+#
+# The `errcheck` excludes below cover Go idioms where checking the
+# return value adds no value: best-effort cleanup in `defer`, terminal
+# writers (fmt.*, os.Stderr.WriteString), and platform lock helpers.
+# Real correctness errors are still flagged.
+
+linters:
+  disable-all: false
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+linters-settings:
+  errcheck:
+    check-blank: false
+    check-type-assertions: false
+    exclude-functions:
+      # Best-effort terminal output; nothing actionable on failure.
+      - fmt:.*
+      - os.Stderr.WriteString
+      # Best-effort cleanup in defer; the error is usually unreachable
+      # or has no actionable response.
+      - (*os.File).Close
+      - (*net.Listener).Close
+      - (*net.Conn).Close
+      - os.Remove
+      - os.RemoveAll
+      # Platform-specific lock helpers used in cleanup paths.
+      - flockUnlock
+
+  staticcheck:
+    # SA1019 is "use of deprecated identifier". Some transitive calls
+    # (e.g. fsnotify, pflag) trigger it; we don't want a deprecated
+    # upstream package to block our own linting.
+    checks: ["all", "-SA1019"]
+
+  govet:
+    enable-all: true

@@ -175,7 +175,7 @@ func RequiredVar(name, profile string) *Error {
 	e := New("E008", "required variable not defined").
 		WithContext("variable", name)
 	if profile != "" {
-		e.WithContext("profile", profile)
+		e = e.WithContext("profile", profile)
 	}
 	return e.WithHint("Set it in envee.toml, .env file, or via a secret plugin.")
 }

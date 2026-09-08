@@ -5,10 +5,8 @@
 package plugin
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -238,14 +236,4 @@ func (r *bytesReaderImpl) Read(p []byte) (int, error) {
 	n := copy(p, r.b[r.i:])
 	r.i += n
 	return n, nil
-}
-
-// scanStderr captures and logs stderr output from a plugin process.
-//
-// Reserved for future use; currently we forward stderr directly.
-func scanStderr(rdr io.Reader) {
-	s := bufio.NewScanner(rdr)
-	for s.Scan() {
-		fmt.Fprintln(os.Stderr, "[plugin]", s.Text())
-	}
 }

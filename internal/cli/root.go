@@ -7,7 +7,6 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -166,12 +165,4 @@ func errUnknownSubcommand(cmd *cobra.Command, name string) error {
 			name, rootName, strings.Join(suggestions, "\n  "))
 	}
 	return fmt.Errorf("unknown command %q for %q", name, rootName)
-}
-
-// fatalf prints an error message to stderr and exits with the given code.
-//
-// Use this only in main(), not in subcommand bodies (return errors instead).
-func fatalf(code int, format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
-	os.Exit(code)
 }

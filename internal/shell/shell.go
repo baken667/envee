@@ -107,11 +107,6 @@ func renderInitTemplate(tpl, selfPath string) string {
 	return strings.ReplaceAll(tpl, "{{.SelfPath}}", selfPath)
 }
 
-// joinDirs joins a slice of directories using the OS PATH separator.
-func joinDirs(dirs []string) string {
-	return strings.Join(dirs, string(PathListSeparator))
-}
-
 // PathListSeparator is the separator for $PATH on the current OS.
 //
 // On Unix, ":". On Windows, ";". We use ":", consistent with bash/zsh conventions.

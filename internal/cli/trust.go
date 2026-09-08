@@ -10,7 +10,6 @@ import (
 
 	"github.com/baken667/envee/internal/config"
 	"github.com/baken667/envee/internal/errs"
-	"github.com/baken667/envee/internal/resolver"
 	"github.com/baken667/envee/internal/trust"
 )
 
@@ -204,20 +203,4 @@ func signTrustEntry(store *trust.Store, target string, cfg *config.Config, keyPa
 	// Placeholder: log that signing is not yet implemented.
 	fmt.Fprintln(os.Stderr, "[envee] WARN: --sign not yet implemented (T2.6)")
 	return nil
-}
-
-// loadForTrust loads a config from the given path (or cwd).
-// Used by other commands that need to know the trust hash.
-func loadForTrust(cmd *cobra.Command) (*config.Config, error) {
-	cwd, _ := os.Getwd()
-	res, err := resolver.New(cwd)
-	if err != nil {
-		return nil, err
-	}
-	profile, _ := cmd.Flags().GetString("profile")
-	if profile == "" {
-		profile = os.Getenv("ENVEE_PROFILE")
-	}
-	res.SetProfile(profile)
-	return res.LoadAll()
 }

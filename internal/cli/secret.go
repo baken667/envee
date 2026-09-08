@@ -108,18 +108,20 @@ func saveSecrets(m map[string]string) error {
 		return err
 	}
 	tmpPath := tmp.Name()
+	// If we don't reach the successful rename, remove the temp file.
+	// Close errors here are best-effort cleanup.
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
 		return err
 	}
 	return os.Rename(tmpPath, path)

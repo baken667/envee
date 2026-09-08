@@ -70,7 +70,9 @@ func Run() error {
 		timer.Reset(idleTimeout)
 
 		// Set a deadline so Accept doesn't block forever.
-		listener.(*net.UnixListener).SetDeadline(time.Now().Add(5 * time.Second))
+		// If SetDeadline fails (e.g. listener already closed) the next
+		// Accept will return an error and the loop will exit cleanly.
+		_ = listener.(*net.UnixListener).SetDeadline(time.Now().Add(5 * time.Second))
 
 		conn, err := listener.Accept()
 		if err != nil {
@@ -120,18 +122,27 @@ func acquireLock(path string) (*lockFile, error) {
 	if err != nil {
 		return nil, err
 	}
+	// From here on, any error must close f before returning.
+	success := false
+	defer func() {
+		if !success {
+			_ = f.Close()
+		}
+	}()
+
 	// Best-effort exclusive lock; if it fails because another daemon holds it,
 	// surface the error.
 	if err := flockExclusive(f); err != nil {
-		f.Close()
 		return nil, err
 	}
 	// Write our PID.
-	fmt.Fprintf(f, "%d\n", os.Getpid())
-	if err := f.Sync(); err != nil {
-		f.Close()
+	if _, err := fmt.Fprintf(f, "%d\n", os.Getpid()); err != nil {
 		return nil, err
 	}
+	if err := f.Sync(); err != nil {
+		return nil, err
+	}
+	success = true
 	return &lockFile{path: path, f: f}, nil
 }
 
