@@ -51,6 +51,23 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - name: go.mod must not outpace the toolchain CI uses
+        # `go get` silently raises the `go` directive to whatever a new
+        # dependency demands. That quietly drops users on older toolchains,
+        # and it surfaces as confusing breakage rather than a clear error:
+        # a directive of 1.26 against GO_VERSION 1.24 produced
+        # `go: no such tool "covdata"` and a golangci-lint config-load
+        # failure, neither of which names the real cause.
+        shell: bash
+        run: |
+          declared=$(awk '/^go /{print $2; exit}' go.mod)
+          if [ "${declared%.*}" != "${GO_VERSION}" ]; then
+            echo "go.mod declares go $declared but CI builds with $GO_VERSION."
+            echo "Either pin the dependency that raised it, or raise GO_VERSION"
+            echo "and the README deliberately -- it is a compatibility change."
+            exit 1
+          fi
+
       - name: Download modules
         run: go mod download
 

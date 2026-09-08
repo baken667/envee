@@ -64,6 +64,13 @@ which checks every file that contributed to the config — not just the first.
 **No new dependencies** without a note in the PR describing why the standard
 library is not enough.
 
+**Watch the `go` directive.** `go get` raises it to whatever a new dependency
+demands, which silently drops users on older toolchains. `golang.org/x/crypto`
+and `golang.org/x/sys` are pinned for exactly this reason — the current
+releases require Go 1.26. CI fails if `go.mod` outpaces the toolchain it
+builds with; raising the minimum Go version is a deliberate compatibility
+decision, not a side effect of adding a dependency.
+
 ## Commits
 
 Conventional commits (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`,
