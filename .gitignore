@@ -10,7 +10,10 @@
 *.out
 coverage.*
 *.coverprofile
-*.html
+# NOT a bare *.html: that silently swallowed site/index.html, so the landing
+# page was never committed and Pages served a 404 while every check passed.
+# `coverage.*` above already covers `go tool cover -html` output.
+/coverage/
 
 # Editor / IDE
 .idea/

@@ -25,12 +25,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check the custom domain is declared
-        # Without CNAME in the artifact the custom domain is dropped on the
-        # next deploy and the site reverts to github.io.
+      - name: Check the site is actually there
+        # This job previously checked only for CNAME. A bare `*.html` rule in
+        # .gitignore had silently swallowed site/index.html, so the artifact
+        # contained the domain marker and no page: Pages served a 404 while
+        # every check reported success. Verify the page itself, not just the
+        # metadata beside it.
         run: |
+          test -f site/index.html || {
+            echo "site/index.html is missing from the checkout."
+            echo "If it exists locally, it is probably gitignored:"
+            echo "  git check-ignore -v site/index.html"
+            exit 1
+          }
           test -f site/CNAME || { echo "site/CNAME is missing"; exit 1; }
           echo "custom domain: $(cat site/CNAME)"
+          echo "page: $(wc -c < site/index.html) bytes"
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
