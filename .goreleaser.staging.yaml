@@ -1,0 +1,173 @@
+# Staging GoReleaser configuration for envee.
+#
+# Builds pre-release artifacts from tags like v0.2.0-rc.1, v0.2.0-beta.1,
+# v0.2.0-alpha.1 and publishes them to the staging tap:
+#   https://github.com/baken667/homebrew-tap-staging
+#
+# Uses GoReleaser v1.x schema (matches goreleaser/goreleaser-action@v5).
+# See .goreleaser.yaml for the full rationale on sticking with v1.x.
+#
+# Differences from .goreleaser.yaml:
+#   - Tap points at homebrew-tap-staging (not homebrew-tap).
+#   - Token is HOMEBREW_TAP_STAGING_TOKEN.
+#   - Release is always marked prerelease.
+#   - Linux packages, Docker images, and cosign signing are skipped
+#     (staging is for binary testing only).
+#
+# Triggered by: .github/workflows/release-staging.yml
+version: 1
+
+project_name: envee
+
+builds:
+  - id: envee
+    main: ./cmd/envee
+    binary: envee
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    ldflags:
+      - -s -w
+      - -X github.com/baken667/envee/internal/version.Version={{.Version}}
+      - -X github.com/baken667/envee/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/baken667/envee/internal/version.Date={{.Date}}
+      - -X github.com/baken667/envee/internal/version.GoVersion={{.GoVersion}}
+
+  - id: enveed
+    main: ./cmd/enveed
+    binary: enveed
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    ldflags:
+      - -s -w
+      - -X github.com/baken667/envee/internal/version.Version={{.Version}}
+      - -X github.com/baken667/envee/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/baken667/envee/internal/version.Date={{.Date}}
+
+archives:
+  - id: envee-archive
+    builds:
+      - envee
+      - enveed
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+      - completions/*
+      - manpages/*
+    format_overrides:
+      - goos: windows
+        format: zip
+
+# No nfpms for staging — skip deb/rpm/apk generation.
+
+# Homebrew formula for the staging tap.
+brews:
+  - name: envee
+    repository:
+      owner: baken667
+      name: homebrew-tap-staging
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_STAGING_TOKEN }}"
+    homepage: "https://envee.dev"
+    description: "Per-directory environment variable manager (pre-release)"
+    license: "MIT"
+    ids:
+      - envee
+      - enveed
+    directory: Formula
+    install: |
+      bin.install "envee"
+      bin.install "enveed"
+      bash_completion.install "completions/envee.bash" => "envee"
+      zsh_completion.install "completions/envee.zsh" => "_envee"
+      fish_completion.install "completions/envee.fish"
+      man1.install Dir["manpages/*.1"]
+      pkgshare.install "stdlib"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/envee --version")
+      output = shell_output("#{bin}/envee init bash")
+      assert_match "_envee_hook", output
+    dependencies: []
+    caveats: |
+      ⚠️  STAGING BUILD — this is a pre-release from the staging tap.
+      Use only for testing. To remove:
+
+          brew uninstall baken667/tap-staging/envee
+
+      To enable envee in your shell, add one of these to your config:
+        bash:  eval "$(envee init bash)"
+        zsh:   eval "$(envee init zsh)"
+        fish:  envee init fish | source
+
+# No cosign signing for staging.
+# No SBOMs for staging — saves time.
+# No Docker images for staging — don't pollute ghcr.io with rc builds.
+
+# GitHub release — always prerelease, clearly labelled.
+release:
+  github:
+    owner: baken667
+    name: envee
+  prerelease: true
+  draft: false
+  name_template: "v{{.Version}} (pre-release)"
+  header: |
+    ## envee {{.Version}} — STAGING / PRE-RELEASE
+
+    Released: {{.Date}}
+    Commit:  {{.ShortCommit}}
+
+    > ⚠️ This is a pre-release from the `staging` branch. It may contain
+    > breaking changes, incomplete features, or known bugs. Do not use in
+    > production.
+
+    Install with Homebrew (from staging tap):
+      brew install baken667/tap-staging/envee
+  footer: |
+    **Compare with previous pre-release**: https://github.com/baken667/envee/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+# Conventional-commits changelog (same rules as the main config).
+changelog:
+  use: git
+  groups:
+    - title: "🚀 Features"
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.*$'
+      order: 0
+    - title: "🐛 Bug Fixes"
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.*$'
+      order: 1
+    - title: "🧰 Maintenance"
+      regexp: '^.*?(chore|docs|style|refactor|perf|test)(\([[:word:]]+\))??!?:.*$'
+      order: 2
+    - title: "💥 Breaking Changes"
+      regexp: '^.*?(BREAKING CHANGE|breaking)(\([[:word:]]+\))??!?:.*$'
+      order: -1
+  filters:
+    exclude:
+      - '^Merge pull request'
+      - '^Merge branch'
+      - '^chore\(release\):'
