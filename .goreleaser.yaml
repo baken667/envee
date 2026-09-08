@@ -1,0 +1,240 @@
+# GoReleaser configuration for envee.
+# See https://goreleaser.com for documentation.
+#
+# This config is what makes envee publishable to Homebrew on every `git tag`.
+# Triggered by: .github/workflows/release.yml
+version: 2
+
+project_name: envee
+
+# Primary "core" binary.
+builds:
+  - id: envee
+    main: ./cmd/envee
+    binary: envee
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    ldflags:
+      - -s -w
+      - -X github.com/baken667/envee/internal/version.Version={{.Version}}
+      - -X github.com/baken667/envee/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/baken667/envee/internal/version.Date={{.Date}}
+      - -X github.com/baken667/envee/internal/version.GoVersion={{.GoVersion}}
+
+  # Long-running daemon companion.
+  - id: enveed
+    main: ./cmd/enveed
+    binary: enveed
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    ldflags:
+      - -s -w
+      - -X github.com/baken667/envee/internal/version.Version={{.Version}}
+      - -X github.com/baken667/envee/internal/version.Commit={{.ShortCommit}}
+      - -X github.com/baken667/envee/internal/version.Date={{.Date}}
+
+archives:
+  - id: envee-archive
+    ids:
+      - envee
+      - enveed
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+      - completions/*
+      - manpages/*
+    format_overrides:
+      - goos: windows
+        format: zip
+
+# Debian / RedHat / Alpine packages for Linux.
+nfpms:
+  - id: packages
+    package_name: envee
+    ids:
+      - envee
+      - enveed
+    formats:
+      - deb
+      - rpm
+      - apk
+    maintainer: "Bauyrzhan Akhmetov <baken667@example.com>"
+    description: "Per-directory environment variable manager"
+    homepage: "https://envee.dev"
+    license: "MIT"
+    dependencies:
+      - bash
+    bindir: /usr/bin
+    section: utils
+    priority: optional
+    contents:
+      - src: ./completions/envee.bash
+        dst: /usr/share/bash-completion/completions/envee
+      - src: ./completions/envee.zsh
+        dst: /usr/share/zsh/vendor-completions/_envee
+      - src: ./completions/envee.fish
+        dst: /usr/share/fish/vendor_completions.d/envee.fish
+      - src: ./manpages/*.1
+        dst: /usr/share/man/man1
+
+# Homebrew formula (pushed to baken667/homebrew-tap on release).
+brews:
+  - id: envee
+    tap:
+      owner: baken
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    name: envee
+    homepage: "https://envee.dev"
+    description: "Per-directory environment variable manager"
+    license: "MIT"
+    repository:
+      owner: baken
+      name: envee
+    directory: Formula
+    install: |
+      bin.install "envee"
+      bin.install "enveed"
+      bash_completion.install "completions/envee.bash" => "envee"
+      zsh_completion.install "completions/envee.zsh" => "_envee"
+      fish_completion.install "completions/envee.fish"
+      man1.install Dir["manpages/*.1"]
+      pkgshare.install "stdlib"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/envee --version")
+      output = shell_output("#{bin}/envee init bash")
+      assert_match "_envee_hook", output
+    dependencies: []
+    caveats: |
+      To enable envee in your shell, add one of these to your config:
+        bash:  eval "$(envee init bash)"
+        zsh:   eval "$(envee init zsh)"
+        fish:  envee init fish | source
+
+# Generate checksums + cosign signatures.
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sig"
+    key: "{{ .Env.COSIGN_KEY }}"
+    output: "${signature}"
+
+# SBOM (CycloneDX) for supply-chain transparency.
+sboms:
+  - id: source-sbom
+    artifacts: source
+  - id: binary-sbom
+    artifacts: binary
+
+# Docker image (multi-arch).
+dockers:
+  - id: docker-amd64
+    use: buildx
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile
+    image_templates:
+      - "ghcr.io/baken667/envee:{{ .Version }}-amd64"
+      - "ghcr.io/baken667/envee:latest-amd64"
+    skip_push: false
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title=envee"
+      - "--label=org.opencontainers.image.description=Per-directory environment variable manager"
+      - "--label=org.opencontainers.image.source=https://github.com/baken667/envee"
+      - "--label=org.opencontainers.image.licenses=MIT"
+  - id: docker-arm64
+    use: buildx
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile
+    image_templates:
+      - "ghcr.io/baken667/envee:{{ .Version }}-arm64"
+      - "ghcr.io/baken667/envee:latest-arm64"
+    skip_push: false
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title=envee"
+      - "--label=org.opencontainers.image.description=Per-directory environment variable manager"
+
+docker_manifests:
+  - name_template: "ghcr.io/baken667/envee:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/baken667/envee:{{ .Version }}-amd64"
+      - "ghcr.io/baken667/envee:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/baken667/envee:latest"
+    image_templates:
+      - "ghcr.io/baken667/envee:latest-amd64"
+      - "ghcr.io/baken667/envee:latest-arm64"
+
+# GitHub release.
+release:
+  github:
+    owner: baken
+    name: envee
+  prerelease: auto
+  draft: false
+  name_template: "v{{.Version}}"
+  header: |
+    ## envee {{.Version}}
+    Released: {{.Date}}
+    Commit:  {{.ShortCommit}}
+
+    Install with Homebrew:
+      brew install baken/tap/envee
+
+    Or download a prebuilt binary from the assets below.
+  footer: |
+    **Full Changelog**: https://github.com/baken667/envee/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+# Conventional-commits changelog.
+changelog:
+  use: git
+  groups:
+    - title: "🚀 Features"
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.*$'
+      order: 0
+    - title: "🐛 Bug Fixes"
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.*$'
+      order: 1
+    - title: "🧰 Maintenance"
+      regexp: '^.*?(chore|docs|style|refactor|perf|test)(\([[:word:]]+\))??!?:.*$'
+      order: 2
+    - title: "💥 Breaking Changes"
+      regexp: '^.*?(BREAKING CHANGE|breaking)(\([[:word:]]+\))??!?:.*$'
+      order: -1
+  filters:
+    exclude:
+      - '^Merge pull request'
+      - '^Merge branch'
+      - '^chore\(release\):'

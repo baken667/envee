@@ -1,0 +1,40 @@
+# API service config: overrides the monorepo root.
+#
+# When you `cd` into services/api, both this file AND the parent
+# monorepo/envee.toml are loaded (child wins on conflict).
+
+schema = "envee/v1"
+profile = "dev"
+
+[env]
+SERVICE_NAME = "api"
+SERVICE_PORT = 8080
+
+# Inherits MONOREPO_ROOT from the parent, but overrides LOG_FORMAT.
+LOG_FORMAT = "text"
+LOG_LEVEL = "debug"
+
+# API-specific PATH additions.
+_.path = [
+  "{{config_root}}/bin",   # services/api/bin
+]
+
+# API-specific dotenv file.
+_.file = [
+  { path = ".env", required = false },
+  { path = ".env.local", redact = true, required = false },
+]
+
+# API-specific secrets.
+DATABASE_URL = { source = "op", ref = "op://Dev/Api-DB/url", redact = true, required = true }
+REDIS_URL = { source = "op", ref = "op://Dev/Redis/url", redact = true }
+
+# Per-profile overlay.
+[profiles.staging]
+DATABASE_URL = { source = "op", ref = "op://Staging/Api-DB/url", redact = true, required = true }
+LOG_LEVEL = "info"
+
+[profiles.prod]
+DATABASE_URL = { source = "op", ref = "op://Production/Api-DB/url", redact = true, required = true }
+LOG_LEVEL = "warn"
+required = ["DATABASE_URL", "REDIS_URL", "STRIPE_API_KEY"]

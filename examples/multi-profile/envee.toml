@@ -1,0 +1,52 @@
+# Multi-profile example: dev, staging, prod.
+#
+# Select profile via:
+#   - envee --profile=prod eval bash
+#   - ENVEE_PROFILE=prod envee eval bash
+#   - default: envee.toml's `profile` field
+
+schema = "envee/v1"
+profile = "dev"
+
+# Base values applied to ALL profiles.
+[env]
+SERVICE_NAME = "myapp"
+LOG_LEVEL = "info"
+METRICS_ENABLED = true
+
+# Common secrets — overridden per profile below.
+DATABASE_PASSWORD = { value = "dev-password", redact = true, required = true }
+
+# ---- Profile: dev -----------------------------------------------------------
+[profiles.dev]
+extends = ["common"]
+
+[profiles.dev.env]
+DATABASE_URL = "postgres://localhost:5432/mydb_dev"
+LOG_LEVEL = "debug"
+DEBUG = true
+SEED_DATA = true
+DATABASE_PASSWORD = "dev-password"
+
+# ---- Profile: staging -------------------------------------------------------
+[profiles.staging]
+extends = ["common"]
+
+[profiles.staging.env]
+DATABASE_URL = "postgres://staging-db.example.com:5432/mydb"
+LOG_LEVEL = "info"
+SENTRY_DSN = "https://staging@sentry.example.com/1"
+DATABASE_PASSWORD = { source = "vault", ref = "secret/data/staging/db#password", redact = true }
+
+# ---- Profile: prod ----------------------------------------------------------
+[profiles.prod]
+extends = ["common"]
+
+[profiles.prod.env]
+DATABASE_URL = { value = "postgres://prod-db.example.com:5432/mydb", required = true }
+LOG_LEVEL = "warn"
+SENTRY_DSN = "https://prod@sentry.example.com/1"
+
+# Profile-specific requirements: when prod is active, these MUST be present.
+[profiles.prod]
+required = ["DATABASE_URL", "DATABASE_PASSWORD", "SENTRY_DSN", "STRIPE_API_KEY"]

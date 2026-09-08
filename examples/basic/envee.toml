@@ -1,0 +1,49 @@
+# Basic example: a single dev environment.
+#
+# Layout: examples/basic/envee.toml
+# Try it: envee trust && envee eval bash
+
+schema = "envee/v1"
+profile = "dev"
+
+[env]
+# Plain string values
+SERVICE_NAME = "myapp"
+DATABASE_URL = "postgres://localhost:5432/mydb"
+
+# Numeric values (TOML int)
+PORT = 5432
+WORKERS = 4
+
+# Boolean
+DEBUG = true
+VERBOSE = false  # value=false UNSETS the variable
+
+# Arrays
+ALLOWED_ORIGINS = ["http://localhost:3000", "https://app.example.com"]
+
+# Templates (ADR-0011)
+LOG_PATH = "{{config_root}}/logs/{{profile}}.log"
+GIT_SHA = "{{env.GITHUB_SHA | default('local')}}"
+
+# Structured values with metadata
+API_KEY = { value = "dev-key-not-for-prod", redact = true, required = false }
+DATABASE_POOL_SIZE = { value = 10, value_type = "int" }
+
+# Directives
+_.path = [
+  "./bin",
+  "{{config_root}}/node_modules/.bin",
+  "{{config_root}}/vendor/bin",
+]
+
+_.file = ".env"
+
+# Inline directive with redaction
+_.file = [
+  { path = ".env", required = false },
+  { path = ".env.local", redact = true, required = false },
+]
+
+# Watched paths — reload when these change
+watch = ["Cargo.toml", "package.json"]

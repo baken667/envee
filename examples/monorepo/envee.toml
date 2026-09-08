@@ -1,0 +1,17 @@
+# Monorepo root config: shared values for all subprojects.
+#
+# A child `envee.toml` (e.g., services/api/envee.toml) takes priority over this one.
+
+schema = "envee/v1"
+
+[env]
+# Shared across the whole monorepo.
+MONOREPO_ROOT = "{{config_root}}"
+INFRA_ENV = "shared-vpc-1"
+LOG_FORMAT = "json"
+
+# Shared PATH additions.
+_.path = [
+  "{{config_root}}/tools/bin",
+  "{{config_root}}/node_modules/.bin",
+]

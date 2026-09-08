@@ -1,0 +1,36 @@
+# Binaries
+/bin/
+/dist/
+/envee
+/enveed
+/envee-*
+
+# Test artifacts
+*.test
+*.out
+coverage.*
+*.coverprofile
+*.html
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Local config
+envee.local.toml
+envee.local.*.toml
+.env
+.env.local
+
+# Research / planning artifacts (cloned sources we analyzed)
+_research/
+
+# Go
+vendor/
+glide.iml
+
+# Goreleaser
+.goreleaser.yml.local
