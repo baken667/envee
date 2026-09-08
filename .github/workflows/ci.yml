@@ -3,8 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+  # No `branches:` filter here. Restricting to PRs targeting main meant a
+  # stacked pull request (one whose base is another feature branch) got no
+  # checks at all, so the work in it went unverified until the branch below
+  # it merged.
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
