@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -146,7 +147,10 @@ func (e *Error) Is(target error) bool {
 
 // Trust returns an E001 error (trust required).
 func Trust(path, hash string) *Error {
-	return New("E001", "envee.toml is not trusted").
+	// Name the actual file. A resolved config is merged from several files
+	// (envee.local.toml, envee.d/*.toml, parent-directory configs), and a
+	// hardcoded "envee.toml" here sent users to the wrong one.
+	return New("E001", filepath.Base(path)+" is not trusted").
 		WithContext("path", path).
 		WithContext("hash", hash).
 		WithHint("Run `envee trust` to review and approve its content.")

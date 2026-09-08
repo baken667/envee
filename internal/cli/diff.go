@@ -52,6 +52,12 @@ func runDiff(cmd *cobra.Command, shellName string, jsonOut bool) error {
 		return err
 	}
 
+	// Trust gate — directive.Apply below can run secret plugins and other
+	// side-effecting directives, so it must not touch an unapproved config.
+	if trustErr := ensureTrusted(cfg); trustErr != nil {
+		return trustErr
+	}
+
 	osEnv := envToMap(os.Environ())
 	result, err := directive.Apply(cmd.Context(), cfg, directive.ApplyOptions{
 		ConfigRoot: filepath.Dir(cfg.Path),

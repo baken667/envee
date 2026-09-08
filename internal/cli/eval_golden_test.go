@@ -106,7 +106,7 @@ func TestGoldenMultiProfileDev(t *testing.T) {
 	got = normalizePath(got, resolveConfigDir(t, "../../examples/multi-profile"), "/Users/.../examples/multi-profile")
 
 	mustContain := []string{
-		"export SERVICE_NAME=myapp;",        // base
+		"export SERVICE_NAME=myapp;",                              // base
 		"export DATABASE_URL=postgres://localhost:5432/mydb_dev;", // dev override
 		"export DATABASE_PASSWORD=dev-password;",                  // dev override
 		"export LOG_LEVEL=info;",                                  // base (not dev's "debug" — debug is not in [env], only [env.*])

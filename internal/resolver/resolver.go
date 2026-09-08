@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/baken667/envee/internal/config"
+	"github.com/baken667/envee/internal/paths"
 )
 
 // Resolver discovers config files for a given working directory.
@@ -39,9 +40,14 @@ func New(cwd string) (*Resolver, error) {
 		return nil, err
 	}
 	return &Resolver{
-		cwd:       abs,
-		fsRoot:    string(filepath.Separator),
-		configDir: filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "envee"),
+		cwd:    abs,
+		fsRoot: string(filepath.Separator),
+		// paths.Config() is XDG-aware and falls back to ~/.config/envee.
+		// Reading $XDG_CONFIG_HOME directly gave the RELATIVE path "envee"
+		// whenever the variable was unset (the usual case on macOS), so the
+		// global config was never found and any directory named ./envee was
+		// loaded in its place.
+		configDir: paths.Config(),
 	}, nil
 }
 
@@ -69,7 +75,12 @@ func (r *Resolver) Discover() ([]string, error) {
 	}
 
 	// Walk from cwd up to fsRoot (or stopAtRoot).
-	for dir := r.cwd; ; dir = filepath.Dir(dir) {
+	//
+	// The loop advances at the bottom of the body only. Do NOT add a post
+	// statement here: combined with the assignment below it moved up two
+	// levels per iteration, so envee.toml in the immediate parent directory
+	// was never discovered.
+	for dir := r.cwd; ; {
 		// Profile-specific files (higher priority than base)
 		if r.profile != "" {
 			add(filepath.Join(dir, "envee.local."+r.profile+".toml"))
@@ -183,6 +194,11 @@ func MergeInto(dst, src *config.Config) {
 		mergeDirectives(dst.Directives, src.Directives)
 	}
 	dst.WatchedPaths = append(dst.WatchedPaths, src.WatchedPaths...)
+
+	// Carry every contributing file forward. dst.Path/dst.FileHash keep
+	// describing the first file only, so without this the trust gate would
+	// approve one file and silently apply the rest.
+	dst.Sources = append(dst.Sources, src.Sources...)
 }
 
 func mergeDirectives(dst, src *config.Directives) {

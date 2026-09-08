@@ -392,7 +392,11 @@ Trust? [Y/n/d(iff)/s(how)/q(uit)]
 **Файлы**:
 - `internal/trust/check.go` — `CheckFile(path, hash) (Status, error)`.
 - `internal/cli/eval.go` — wire trust check (T1.1 refactored).
-- `internal/cli/init.go` — env var `ENVEE_BYPASS_TRUST=1` для тестов.
+- ~~`internal/cli/init.go` — env var `ENVEE_BYPASS_TRUST=1` для тестов.~~ Отменено:
+  envee экспортирует переменные в шелл пользователя, поэтому один доверенный конфиг
+  мог бы выставить `ENVEE_BYPASS_TRUST=1` и отключить проверку доверия для всех
+  остальных каталогов сессии. Тесты вместо этого подменяют `XDG_DATA_HOME` и
+  наполняют trust-store напрямую. Конфигам запрещено задавать любые `ENVEE_*`.
 
 **Acceptance**:
 - `envee eval` в untusted `examples/basic` → error E001 с hint.

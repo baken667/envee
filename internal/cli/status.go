@@ -90,7 +90,20 @@ func runStatus(cmd *cobra.Command, jsonOut, showSecrets, profileFlag, trustFlag,
 		fmt.Printf("  _.script:   %d entries\n", len(cfg.Directives.Script))
 		fmt.Printf("  _.secret:   %d entries\n", len(cfg.Directives.Secret))
 
-		// Apply directives for a sample preview.
+		// Apply directives for a sample preview — but only for a fully
+		// trusted config. Apply() can run secret plugins and other
+		// side-effecting directives, so a diagnostic command must not
+		// trigger it for files the user has never approved. Report the
+		// untrusted files instead; that is the diagnosis.
+		if untrusted := untrustedSources(cfg); len(untrusted) > 0 {
+			fmt.Println()
+			fmt.Println("Not trusted (env not resolved — run `envee trust`):")
+			for _, src := range untrusted {
+				fmt.Printf("  %s (hash %s)\n", src.Path, src.Hash)
+			}
+			return nil
+		}
+
 		osEnv := envToMap(os.Environ())
 		dispatcher, _ := plugin.DiscoverAndLoad(cmd.Context())
 		result, err := directive.Apply(cmd.Context(), cfg, directive.ApplyOptions{

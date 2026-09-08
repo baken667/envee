@@ -23,12 +23,12 @@ var RootCmd *cobra.Command
 
 // ExitCode maps a Cobra error to a process exit code per ADR-0017.
 //
-//   0 — success
-//   2 — invalid usage (cobra built-in)
-//   3 — trust required
-//   4 — config error
-//   5 — plugin error
-//   6 — internal error
+//	0 — success
+//	2 — invalid usage (cobra built-in)
+//	3 — trust required
+//	4 — config error
+//	5 — plugin error
+//	6 — internal error
 func ExitCode(err error) int {
 	if err == nil {
 		return 0

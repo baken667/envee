@@ -69,6 +69,7 @@ func ParseBytes(path string, data []byte) (*Config, error) {
 
 	// Compute canonical hash.
 	cfg.FileHash = canonicalHash(data)
+	cfg.Sources = []SourceFile{{Path: path, Hash: cfg.FileHash}}
 
 	// Stat for mtime.
 	if info, err := os.Stat(path); err == nil {

@@ -84,9 +84,6 @@ func DoubleQuoteEscape(s string) string {
 			b.WriteString(`\r`)
 		case '\t':
 			b.WriteString(`\t`)
-		case '!':
-			// History expansion — escape to be safe in interactive shells.
-			b.WriteString(`\!`)
 		default:
 			b.WriteByte(c)
 		}
@@ -114,6 +111,18 @@ func ansiCEscape(s string) string {
 			escape = true
 		case c == '\t':
 			b.WriteString(`\t`)
+			escape = true
+		case c == '\\':
+			// Inside $'...' a backslash introduces an escape sequence, so a
+			// literal backslash must be doubled. Without this, a value ending
+			// in `\` swallows the closing quote.
+			b.WriteString(`\\`)
+			escape = true
+		case c == '\'':
+			// $'...' is terminated by an unescaped single quote. Emitting it
+			// raw ends the string and hands the rest of the value to the shell
+			// as code.
+			b.WriteString(`\'`)
 			escape = true
 		case c < 0x20 || c == 0x7f:
 			fmt.Fprintf(&b, `\x%02x`, c)
