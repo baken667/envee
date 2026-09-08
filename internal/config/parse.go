@@ -165,6 +165,58 @@ func directivesFromMap(m map[string]any) *Directives {
 		}
 	}
 
+	// secret: a table keyed by variable name.
+	//
+	//   [env._.secret.DB_PASSWORD]
+	//   source = "vault"
+	//   ref = "secret/data/db#password"
+	//
+	// This was previously not handled at all, so the form documented in
+	// ADR-0004 and used in the examples was silently discarded: the variable
+	// simply never appeared, `envee status` reported "_.secret: 0 entries",
+	// and `envee check` said "no problems found" because it had nothing to
+	// look at. The shorthand form (NAME = { source = ... } under [env]) was
+	// unaffected, which is why this went unnoticed.
+	if v, ok := m["secret"].(map[string]any); ok {
+		for name, raw := range v {
+			mm, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if d.Secret == nil {
+				d.Secret = make(map[string]SecretRef)
+			}
+			d.Secret[name] = SecretRef{
+				Source:   strOf(mm["source"]),
+				Ref:      strOf(mm["ref"]),
+				Account:  strOf(mm["account"]),
+				Vault:    strOf(mm["vault"]),
+				Profile:  strOf(mm["profile"]),
+				Redact:   boolOf(mm["redact"]),
+				Required: boolOf(mm["required"]),
+			}
+		}
+	}
+
+	// source: a list of tables, or a bare string path.
+	switch v := m["source"].(type) {
+	case string:
+		d.Source = append(d.Source, SourceRef{Path: v})
+	case []any:
+		for _, item := range v {
+			switch mm := item.(type) {
+			case map[string]any:
+				d.Source = append(d.Source, SourceRef{
+					Path:   strOf(mm["path"]),
+					Shell:  strOf(mm["shell"]),
+					Redact: boolOf(mm["redact"]),
+				})
+			case string:
+				d.Source = append(d.Source, SourceRef{Path: mm})
+			}
+		}
+	}
+
 	return d
 }
 

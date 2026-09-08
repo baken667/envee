@@ -9,6 +9,28 @@ the curated view.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`[env._.secret.NAME]` was silently discarded.** The parser handled the
+  `file`, `path` and `script` directives but not `secret` or `source`, so the
+  table form documented in ADR-0004 never produced a variable: `envee status`
+  reported `_.secret: 0 entries` and `envee check` found nothing to complain
+  about, because neither had anything to look at. The shorthand
+  `NAME = { source = ... }` under `[env]` was unaffected, which is why this
+  went unnoticed. `_.source` was dropped the same way.
+
+### Changed
+
+- Plugins are no longer discovered when a config declares no secrets. The
+  discovery walk reads every directory in `$PATH` and then runs `metadata` as
+  a subprocess per installed plugin — measured at **0.9 ms and 4400
+  allocations** against a normal `$PATH`, paid on every shell prompt whether
+  or not the project used a plugin. Installing plugins made every prompt
+  slower everywhere. `envee eval` drops from 4.7 ms to 3.8 ms as a result.
+- Added benchmarks for config discovery, loading and plugin lookup; there were
+  none, so no performance claim could be checked.
+
+
 ## [0.2.1] — 2026-09-08
 
 ### Fixed
