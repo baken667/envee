@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -84,19 +85,25 @@ func TestGoldenBasic(t *testing.T) {
 		"export DATABASE_POOL_SIZE=10;",
 		"export LOG_FORMAT=json;",
 		"export LOG_LEVEL=info;",
-		"export LOG_PATH=/Users/.../examples/basic/logs/dev.log;",
 		"export GIT_SHA=local;",
 		"export FEATURE_FLAG_NEW_UI=true;",
-		// PATH should have all 3 prepended dirs from _.path.
-		"/Users/.../examples/basic/bin:",
-		"/Users/.../examples/basic/node_modules/.bin:",
-		"/Users/.../examples/basic/vendor/bin:",
 		`export ALLOWED_ORIGINS='[http://localhost:3000, https://app.example.com]';`,
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(got, want) {
 			t.Errorf("basic missing %q\n---\ngot:\n%s", want, got)
 		}
+	}
+
+	assertExport(t, got, "LOG_PATH", "/Users/.../examples/basic/logs/dev.log")
+
+	// PATH should have all 3 prepended dirs from _.path.
+	for _, dir := range []string{
+		"/Users/.../examples/basic/bin",
+		"/Users/.../examples/basic/node_modules/.bin",
+		"/Users/.../examples/basic/vendor/bin",
+	} {
+		assertPathEntry(t, got, dir)
 	}
 }
 
@@ -127,8 +134,9 @@ func TestGoldenMonorepo(t *testing.T) {
 	got = normalizePath(got, resolveConfigDir(t, "../../examples/monorepo/services/api"), "/Users/.../examples/monorepo/services/api")
 
 	// Check key invariants without exact-string match (PATH order varies by env).
+	assertExport(t, got, "MONOREPO_ROOT", "/Users/.../examples/monorepo/services/api")
+
 	mustContain := []string{
-		"export MONOREPO_ROOT=/Users/.../examples/monorepo/services/api;",
 		"export INFRA_ENV=shared-vpc-1;",
 		"export LOG_FORMAT=json;",
 		"export LOG_LEVEL=debug;",
@@ -139,6 +147,28 @@ func TestGoldenMonorepo(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("monorepo missing line %q\n---\ngot:\n%s", want, got)
 		}
+	}
+}
+
+// assertExport checks that the script exports key with the given value,
+// tolerating the surrounding quotes BashEscape adds for values that need
+// them. Absolute paths need them on Windows (they contain backslashes) and
+// not on Unix, so an exact-string assertion cannot cover both.
+func assertExport(t *testing.T, script, key, value string) {
+	t.Helper()
+	re := regexp.MustCompile(`export ` + regexp.QuoteMeta(key) + `='?` + regexp.QuoteMeta(value) + `'?;`)
+	if !re.MatchString(script) {
+		t.Errorf("script does not export %s=%s\n---\ngot:\n%s", key, value, script)
+	}
+}
+
+// assertPathEntry checks that dir was prepended to PATH, again tolerating
+// optional quoting.
+func assertPathEntry(t *testing.T, script, dir string) {
+	t.Helper()
+	re := regexp.MustCompile(`'?` + regexp.QuoteMeta(dir) + `'?:`)
+	if !re.MatchString(script) {
+		t.Errorf("PATH is missing %s\n---\ngot:\n%s", dir, script)
 	}
 }
 
