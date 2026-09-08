@@ -6,6 +6,8 @@
 [![Go 1.24+](https://img.shields.io/badge/Go-1.24+-blue.svg)](go.mod)
 [![Homebrew](https://img.shields.io/badge/Homebrew-baken667%2Ftap-orange.svg)](https://github.com/baken667/homebrew-tap)
 
+**[envee.bkn.wtf](https://envee.bkn.wtf)**
+
 ```bash
 # 1. Install (Homebrew, after first release)
 brew install baken667/tap/envee
