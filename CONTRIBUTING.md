@@ -77,11 +77,42 @@ Conventional commits (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`,
 `test:`). The release changelog is generated from them, so the subject line is
 what users read. Explain *why* in the body; the diff already shows *what*.
 
+## Branches
+
+`main` is what users install. `staging` is the integration branch, and it is
+where work lands first.
+
+```
+feature branch  →  PR into staging  →  (accumulate)
+                →  tag vX.Y.Z-rc.N  →  staging tap  →  verify
+                →  PR staging into main  →  tag vX.Y.Z
+```
+
+Both branches run the full CI suite on push and on pull requests. Open pull
+requests against `staging` unless you are promoting a verified release
+candidate.
+
 ## Releasing
 
-Maintainers only. Tag `vX.Y.Z` on `main`; the Release workflow builds, signs
-and pushes the Homebrew formula. Pre-release tags (`-rc.N`, `-beta.N`,
-`-alpha.N`) go to the staging tap instead.
+Maintainers only.
+
+Pre-release tags (`-rc.N`, `-beta.N`, `-alpha.N`) are cut from `staging` and
+publish to [`baken667/homebrew-tap-staging`](https://github.com/baken667/homebrew-tap-staging):
+
+```bash
+git tag -a v0.3.0-rc.1 -m "..." && git push origin v0.3.0-rc.1
+brew install baken667/tap-staging/envee   # exercise it for real
+```
+
+Stable tags are cut from `main` after `staging` merges, and publish to the
+production tap. `release.yml` skips any tag containing `-`, so a release
+candidate cannot accidentally trigger a production release — the two workflows
+would otherwise race on the same GitHub release.
+
+The staging config deliberately omits signing, Linux packages and SBOMs; it
+exists to exercise the build, the GitHub release and the formula push. Keep its
+`brews.test` block in sync with the production one, or the pre-release channel
+verifies less than the thing it is meant to de-risk.
 
 Note that a tag can never be moved once pushed: `sum.golang.org` notarises the
 module at that version permanently, and re-tagging breaks
