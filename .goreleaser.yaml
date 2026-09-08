@@ -196,7 +196,7 @@ signs:
       - COSIGN_PASSWORD
     args:
       - sign-blob
-      - --key=file:///tmp/cosign.key
+      - --key=/tmp/cosign.key
       - --output-signature=${signature}
       - ${artifact}
 
