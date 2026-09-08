@@ -58,17 +58,17 @@ type ReqContext struct {
 
 // Response is the JSON body returned by a plugin's resolve subcommand.
 type Response struct {
-	APIVersion int            `json:"api_version"`
-	RequestID  string         `json:"request_id"`
-	Status     string         `json:"status"`
-	Value      *Value         `json:"value,omitempty"`
-	Metadata   *RespMetadata  `json:"metadata,omitempty"`
-	Error      *PluginError   `json:"error,omitempty"`
+	APIVersion int           `json:"api_version"`
+	RequestID  string        `json:"request_id"`
+	Status     string        `json:"status"`
+	Value      *Value        `json:"value,omitempty"`
+	Metadata   *RespMetadata `json:"metadata,omitempty"`
+	Error      *PluginError  `json:"error,omitempty"`
 }
 
 // Value is the resolved value from a plugin.
 type Value struct {
-	Type  string `json:"type"`  // "string" | "int" | "bool" | "json"
+	Type  string `json:"type"` // "string" | "int" | "bool" | "json"
 	Value any    `json:"value"`
 }
 
@@ -81,9 +81,9 @@ type RespMetadata struct {
 
 // PluginError represents an error response from a plugin.
 type PluginError struct {
-	Code       string `json:"code"`
-	Message    string `json:"message"`
-	Recoverable bool  `json:"recoverable"`
+	Code        string `json:"code"`
+	Message     string `json:"message"`
+	Recoverable bool   `json:"recoverable"`
 }
 
 // Registry holds the set of discovered plugins.
@@ -170,7 +170,7 @@ type execPlugin struct {
 	metadata Metadata
 }
 
-func (p *execPlugin) Name() string     { return p.name }
+func (p *execPlugin) Name() string       { return p.name }
 func (p *execPlugin) Metadata() Metadata { return p.metadata }
 
 // fetchMetadata invokes `envee-plugin-X metadata` and parses the JSON output.

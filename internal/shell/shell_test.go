@@ -53,16 +53,16 @@ func TestSingleQuote(t *testing.T) {
 
 func TestDetectShell(t *testing.T) {
 	cases := map[string]Name{
-		"bash":   Bash,
-		"zsh":    Zsh,
-		"fish":   Fish,
-		"nu":     Nu,
-		"nushell": Nu,
-		"pwsh":   Pwsh,
+		"bash":       Bash,
+		"zsh":        Zsh,
+		"fish":       Fish,
+		"nu":         Nu,
+		"nushell":    Nu,
+		"pwsh":       Pwsh,
 		"powershell": Pwsh,
-		"BASH":   Bash,
-		"Zsh":    Zsh,
-		"":       "",
+		"BASH":       Bash,
+		"Zsh":        Zsh,
+		"":           "",
 	}
 	for in, want := range cases {
 		got := Detect(in)

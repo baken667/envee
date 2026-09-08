@@ -29,9 +29,9 @@ func Parse(path string) (*Config, error) {
 // in cfg.FileHash. This makes the hash stable to formatting changes.
 func ParseBytes(path string, data []byte) (*Config, error) {
 	cfg := &Config{
-		Path:      path,
-		Env:       make(map[string]any),
-		Profiles:  make(map[string]*Profile),
+		Path:       path,
+		Env:        make(map[string]any),
+		Profiles:   make(map[string]*Profile),
 		Directives: &Directives{},
 	}
 

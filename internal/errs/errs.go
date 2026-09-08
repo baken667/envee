@@ -33,7 +33,7 @@ type Error struct {
 	Summary  string            // short, one-line description
 	Context  map[string]string // structured details (path, hash, key, ...)
 	Hint     string            // what the user can do
-	Doc      string            // URL with more info (https://envee.dev/errors/<code>)
+	Doc      string            // URL with more info (docs/errors.md#<code>)
 	Cause    error             // optional wrapped error
 }
 
@@ -131,7 +131,10 @@ func defaultDoc(code string) string {
 	if code == "" {
 		return ""
 	}
-	return "https://envee.dev/errors/" + strings.ToLower(code)
+	// envee.dev was never registered. Point at the docs that actually
+	// exist; this is the single place to change if the project gets a
+	// site later.
+	return "https://github.com/baken667/envee/blob/main/docs/errors.md#" + strings.ToLower(code)
 }
 
 // Is implements errors.Is for *Error (matches on Code).

@@ -160,9 +160,9 @@ func (m *Map) Merge(other *Map) {
 // DiffOp describes a single change between two env states.
 type DiffOp struct {
 	Key   string
-	Set   bool     // true = set, false = unset
-	Value string   // only meaningful if Set
-	Old   string   // previous value, if any
+	Set   bool   // true = set, false = unset
+	Value string // only meaningful if Set
+	Old   string // previous value, if any
 }
 
 // Diff returns the diff from m -> other (what would change if we replaced m with other).

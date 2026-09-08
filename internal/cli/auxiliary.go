@@ -98,7 +98,7 @@ func newTelemetryCmd() *cobra.Command {
 		Use:   "telemetry",
 		Short: "Manage opt-in telemetry",
 		Long: `envee can collect anonymous usage events to help prioritize development.
-This is OFF by default. See https://envee.dev/privacy for details.`,
+This is OFF by default. Not implemented yet; nothing is collected.`,
 	}
 
 	status := &cobra.Command{

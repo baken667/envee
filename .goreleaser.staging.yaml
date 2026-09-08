@@ -19,6 +19,12 @@ version: 1
 
 project_name: envee
 
+# Same generated artifacts as the production config.
+before:
+  hooks:
+    - go run ./cmd/gen-docs completions --output completions/
+    - go run ./cmd/gen-docs man --output manpages/
+
 builds:
   - id: envee
     main: ./cmd/envee
@@ -72,12 +78,12 @@ archives:
     builds:
       - envee
       - enveed
+    allow_different_binary_count: true
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format: tar.gz
     files:
       - README.md
       - LICENSE
-      - CHANGELOG.md
       - completions/*
       - manpages/*
     format_overrides:
@@ -94,12 +100,14 @@ brews:
       name: homebrew-tap-staging
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_STAGING_TOKEN }}"
-    homepage: "https://envee.dev"
+    homepage: "https://github.com/baken667/envee"
     description: "Per-directory environment variable manager (pre-release)"
     license: "MIT"
+    # NOTE: in goreleaser v1 `brews.ids` filters ARCHIVE ids, not build ids.
+    # Listing the build ids here matched no archive and failed the release
+    # with "no linux/macos archives found matching ...".
     ids:
-      - envee
-      - enveed
+      - envee-archive
     directory: Formula
     install: |
       bin.install "envee"
@@ -108,11 +116,10 @@ brews:
       zsh_completion.install "completions/envee.zsh" => "_envee"
       fish_completion.install "completions/envee.fish"
       man1.install Dir["manpages/*.1"]
-      pkgshare.install "stdlib"
     test: |
       assert_match version.to_s, shell_output("#{bin}/envee --version")
-      output = shell_output("#{bin}/envee init bash")
-      assert_match "_envee_hook", output
+      assert_match "_envee_hook", shell_output("#{bin}/envee init bash")
+      assert_match "add-zsh-hook", shell_output("#{bin}/envee init zsh")
     dependencies: []
     caveats: |
       ⚠️  STAGING BUILD — this is a pre-release from the staging tap.

@@ -12,15 +12,13 @@ version: 1
 
 project_name: envee
 
-# before-hook: decode the base64-encoded COSIGN_KEY secret and write
-# it to a file so the signs step can use --key=file://... instead of
-# fighting goreleaser's template expansion on the env var.
-#
-# goreleaser v1.x runs hook `cmd` directly (no shell), so we wrap in
-# `sh -c` for multi-line scripts.
+# Generate the shell completions and man pages that the archives, the Linux
+# packages and the Homebrew formula ship. They are not committed -- see
+# cmd/gen-docs and the /completions//manpages entries in .gitignore.
 before:
   hooks:
-    - sh -c 'if [ -n "$COSIGN_KEY" ]; then echo "Writing cosign key to /tmp/cosign.key"; echo -n "$COSIGN_KEY" | base64 -d > /tmp/cosign.key; chmod 600 /tmp/cosign.key; fi'
+    - go run ./cmd/gen-docs completions --output completions/
+    - go run ./cmd/gen-docs man --output manpages/
 
 # Primary "core" binary.
 builds:
@@ -88,13 +86,9 @@ archives:
     files:
       - README.md
       - LICENSE
-      # CHANGELOG.md, completions/* and manpages/* are not in the
-      # repo yet (no Cobra setup that auto-generates them, no
-      # hand-written manpages). Re-add once we wire up a
-      # before-hook that emits them from the cobra command tree.
-      # - CHANGELOG.md
-      # - completions/*
-      # - manpages/*
+      # Produced by the before-hooks above.
+      - completions/*
+      - manpages/*
     format_overrides:
       - goos: windows
         format: zip
@@ -112,7 +106,7 @@ nfpms:
       - apk
     maintainer: "Bauyrzhan Akhmetov <baken667@users.noreply.github.com>"
     description: "Per-directory environment variable manager"
-    homepage: "https://envee.dev"
+    homepage: "https://github.com/baken667/envee"
     license: "MIT"
     dependencies:
       - bash
@@ -120,16 +114,14 @@ nfpms:
     section: utils
     priority: optional
     contents:
-      # TODO: re-add completions/manpages once we wire up a
-      # before-hook that emits them. See notes in archives.
-      # - src: ./completions/envee.bash
-      #   dst: /usr/share/bash-completion/completions/envee
-      # - src: ./completions/envee.zsh
-      #   dst: /usr/share/zsh/vendor-completions/_envee
-      # - src: ./completions/envee.fish
-      #   dst: /usr/share/fish/vendor_completions.d/envee.fish
-      # - src: ./manpages/*.1
-      #   dst: /usr/share/man/man1
+      - src: ./completions/envee.bash
+        dst: /usr/share/bash-completion/completions/envee
+      - src: ./completions/envee.zsh
+        dst: /usr/share/zsh/vendor-completions/_envee
+      - src: ./completions/envee.fish
+        dst: /usr/share/fish/vendor_completions.d/envee.fish
+      - src: ./manpages/*.1
+        dst: /usr/share/man/man1
 
 # Homebrew formula (pushed to baken667/homebrew-tap on release).
 # In v1.x, `repository:` is the tap (replaces deprecated `tap:`).
@@ -141,30 +133,27 @@ brews:
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: "https://envee.dev"
+    homepage: "https://github.com/baken667/envee"
     description: "Per-directory environment variable manager"
     license: "MIT"
+    # NOTE: in goreleaser v1 `brews.ids` filters ARCHIVE ids, not build ids.
+    # Listing the build ids here matched no archive and failed the release
+    # with "no linux/macos archives found matching ...".
     ids:
-      - envee
-      - enveed
+      - envee-archive
     directory: Formula
     install: |
       bin.install "envee"
       bin.install "enveed"
-      # TODO: re-add shell completions and manpages once we wire up
-      # a before-hook that emits them (cobra root.CompletionOptions
-      # + a go-md2man-style generator). For now the binary ships
-      # without them — users can still drive envee by reading the
-      # help output (`envee --help`).
-      # bash_completion.install "completions/envee.bash" => "envee"
-      # zsh_completion.install "completions/envee.zsh" => "_envee"
-      # fish_completion.install "completions/envee.fish"
-      # man1.install Dir["manpages/*.1"]
-      pkgshare.install "stdlib"
+      bash_completion.install "completions/envee.bash" => "envee"
+      zsh_completion.install "completions/envee.zsh" => "_envee"
+      fish_completion.install "completions/envee.fish"
+      man1.install Dir["manpages/*.1"]
     test: |
       assert_match version.to_s, shell_output("#{bin}/envee --version")
-      output = shell_output("#{bin}/envee init bash")
-      assert_match "_envee_hook", output
+      assert_match "_envee_hook", shell_output("#{bin}/envee init bash")
+      assert_match "add-zsh-hook", shell_output("#{bin}/envee init zsh")
+      assert_match "_envee_hook", shell_output("#{bin}/envee init fish")
     dependencies: []
     caveats: |
       To enable envee in your shell, add one of these to your config:
@@ -177,27 +166,36 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
-# Cosign signatures. The key is decoded from the COSIGN_KEY env var
-# (base64) to /tmp/cosign.key by the before-hook above, then passed
-# to cosign via --key=file://... to avoid the env template quirk
-# in goreleaser v1.x (where {{ .Env.X }} fails if the env var is
-# only available at process scope, not via the goreleaser context).
+# Keyless cosign signatures (Sigstore).
+#
+# There is no key material anywhere: cosign exchanges the GitHub Actions OIDC
+# token for a short-lived Fulcio certificate and records the signature in the
+# public Rekor transparency log. The previous setup carried a base64 private
+# key plus its password in repo secrets, and failed on every single release
+# because the two had drifted apart.
+#
+# Requires `permissions: id-token: write` in the workflow and
+# sigstore/cosign-installer -- both already present in release.yml.
 signs:
-  - cmd: cosign
+  - id: keyless
+    cmd: cosign
     artifacts: checksum
     signature: "${artifact}.sig"
+    # This field is what makes goreleaser upload the certificate as a release
+    # asset. Without it the .pem is written to dist/ and discarded, and
+    # keyless verification is then impossible for users.
+    certificate: "${artifact}.pem"
     output: true
-    # Pass the cosign password as a plain env var (no template
-    # expansion). goreleaser v1.x's .Env map doesn't reliably see
-    # values that come from the GitHub Actions env: block, so we
-    # rely on the cmd inheriting the parent's env directly via
-    # the plain `key=value` syntax below.
-    env:
-      - COSIGN_PASSWORD
     args:
       - sign-blob
-      - --key=/tmp/cosign.key
+      # cosign otherwise prompts on stdin about the transparency log; in a
+      # non-TTY CI job that hangs or fails.
+      - --yes
+      # Pin the ambient credential provider. Left to probe, cosign can fall
+      # back to an interactive browser flow.
+      - --oidc-provider=github-actions
       - --output-signature=${signature}
+      - --output-certificate=${certificate}
       - ${artifact}
 
 # SBOM (CycloneDX) for supply-chain transparency.
@@ -210,46 +208,10 @@ signs:
 #   - id: binary-sbom
 #     artifacts: binary
 
-# Docker image (multi-arch). v1.x uses dockers + docker_manifests.
-dockers:
-  - id: docker-amd64
-    use: buildx
-    goos: linux
-    goarch: amd64
-    dockerfile: Dockerfile
-    image_templates:
-      - "ghcr.io/baken667/envee:{{ .Version }}-amd64"
-      - "ghcr.io/baken667/envee:latest-amd64"
-    skip_push: false
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.title=envee"
-      - "--label=org.opencontainers.image.description=Per-directory environment variable manager"
-      - "--label=org.opencontainers.image.source=https://github.com/baken667/envee"
-      - "--label=org.opencontainers.image.licenses=MIT"
-  - id: docker-arm64
-    use: buildx
-    goos: linux
-    goarch: arm64
-    dockerfile: Dockerfile
-    image_templates:
-      - "ghcr.io/baken667/envee:{{ .Version }}-arm64"
-      - "ghcr.io/baken667/envee:latest-arm64"
-    skip_push: false
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.title=envee"
-      - "--label=org.opencontainers.image.description=Per-directory environment variable manager"
-
-docker_manifests:
-  - name_template: "ghcr.io/baken667/envee:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/baken667/envee:{{ .Version }}-amd64"
-      - "ghcr.io/baken667/envee:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/baken667/envee:latest"
-    image_templates:
-      - "ghcr.io/baken667/envee:latest-amd64"
-      - "ghcr.io/baken667/envee:latest-arm64"
+# Docker images are not built for now: envee is a shell-hook tool that reads
+# envee.toml from the host cwd and mutates the host shell's environment, so a
+# container can do neither, and the dockers: blocks referenced a Dockerfile
+# that does not exist in this repo. Reinstate together with a real Dockerfile.
 
 # GitHub release.
 release:
@@ -269,6 +231,27 @@ release:
 
     Or download a prebuilt binary from the assets below.
   footer: |
+    ### Verify this release
+
+    Artifacts are signed keylessly with [Sigstore](https://sigstore.dev) —
+    there is no public key to trust. The signature is bound to the GitHub
+    Actions workflow that produced it and is recorded in the public Rekor
+    transparency log.
+
+    Download `checksums.txt`, `checksums.txt.sig` and `checksums.txt.pem`
+    from the assets below, then:
+
+    ```sh
+    cosign verify-blob checksums.txt \
+      --certificate checksums.txt.pem \
+      --signature   checksums.txt.sig \
+      --certificate-identity "https://github.com/baken667/envee/.github/workflows/release.yml@refs/tags/{{ .Tag }}" \
+      --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+
+    # checksums.txt is now trusted; check your download against it:
+    sha256sum --ignore-missing -c checksums.txt
+    ```
+
     **Full Changelog**: https://github.com/baken667/envee/compare/{{ .PreviousTag }}...{{ .Tag }}
 
 # Conventional-commits changelog.

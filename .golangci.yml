@@ -1,54 +1,76 @@
-# golangci-lint configuration for envee.
+# golangci-lint configuration for envee (schema v2).
 #
-# Defaults are kept intentionally close to upstream so we get the same
-# linter set the CI workflow uses (golangci/golangci-lint-action@v6 with
-# version: latest, which pulls the latest stable v1 release).
-#
-# The `errcheck` excludes below cover Go idioms where checking the
-# return value adds no value: best-effort cleanup in `defer`, terminal
-# writers (fmt.*, os.Stderr.WriteString), and platform lock helpers.
-# Real correctness errors are still flagged.
+# v2 is what `brew install golangci-lint` provides today, and v1 is
+# end-of-life. The v1 schema this file used to carry made the linter refuse to
+# start ("unsupported version of the configuration"), so `make lint` was
+# broken for anyone who installed the tool normally.
+
+version: "2"
 
 linters:
-  disable-all: false
+  # "standard" is errcheck, govet, ineffassign, staticcheck and unused --
+  # exactly the previous enable: list. gosimple is absent because v2 merged
+  # it (and stylecheck) into staticcheck; naming it here is a hard error.
+  default: standard
+
+  settings:
+    errcheck:
+      check-blank: false
+      check-type-assertions: false
+      # Go idioms where the returned error carries no action: best-effort
+      # cleanup in defer, and writes to a terminal.
+      #
+      # These are fully-qualified names, NOT regexes. The old config listed
+      # `fmt:.*`, which silently matched nothing, and used pointer receivers
+      # for net.Listener/net.Conn, which are interfaces and have no pointer
+      # method set -- so those exclusions never applied either.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*os.File).Close
+        - (*os.File).WriteString
+        - (net.Listener).Close
+        - (net.Conn).Close
+        - os.Remove
+        - os.RemoveAll
+
+    staticcheck:
+      # SA1019 is "use of a deprecated identifier", which fires on transitive
+      # calls into dependencies. In v2 this list also governs the checks that
+      # used to live in gosimple (S1xxx) and stylecheck (ST1xxx).
+      checks:
+        - all
+        - -SA1019
+
+    govet:
+      # fieldalignment is a padding micro-optimisation: noisy, subjective and
+      # unrelated to correctness. Everything else is on.
+      enable-all: true
+      disable:
+        - fieldalignment
+
+  exclusions:
+    generated: lax
+    # v1 applied a default exclusion set implicitly. In v2 those became named
+    # presets; without them the migration would surface a wave of findings
+    # that have nothing to do with any actual change.
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
+formatters:
   enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-
-linters-settings:
-  errcheck:
-    check-blank: false
-    check-type-assertions: false
-    exclude-functions:
-      # Best-effort terminal output; nothing actionable on failure.
-      - fmt:.*
-      - os.Stderr.WriteString
-      # Best-effort cleanup in defer; the error is usually unreachable
-      # or has no actionable response.
-      - (*os.File).Close
-      - (*net.Listener).Close
-      - (*net.Conn).Close
-      - os.Remove
-      - os.RemoveAll
-      # Platform-specific lock helpers used in cleanup paths.
-      - flockUnlock
-
-  staticcheck:
-    # SA1019 is "use of deprecated identifier". Some transitive calls
-    # (e.g. fsnotify, pflag) trigger it; we don't want a deprecated
-    # upstream package to block our own linting.
-    checks: ["all", "-SA1019"]
-
-  govet:
-    # Enable all standard govet analyzers except `fieldalignment`,
-    # which is a micro-optimization hint (re-order struct fields by size
-    # to save a few bytes of padding). It's noisy, subjective, and
-    # orthogonal to correctness — many Go codebases leave structs in
-    # logical (declaration-order) layout.
-    enable-all: true
-    disable:
-      - fieldalignment
+    - gofmt
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

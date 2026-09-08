@@ -108,7 +108,7 @@ func Apply(ctx context.Context, cfg *config.Config, opts ApplyOptions, reg Plugi
 				}
 				res.Env.SetWithMeta(env.Entry{
 					Key:      k,
-					Value:   val,
+					Value:    val,
 					Redacted: redact,
 					Source:   "profile:" + opts.Profile,
 				})
@@ -153,7 +153,7 @@ func Apply(ctx context.Context, cfg *config.Config, opts ApplyOptions, reg Plugi
 		}
 		res.Env.SetWithMeta(env.Entry{
 			Key:      k,
-			Value:   val,
+			Value:    val,
 			Redacted: redact,
 			Source:   "toml",
 		})
@@ -386,7 +386,7 @@ func applyFileDirective(ctx context.Context, cfg *config.Config, opts ApplyOptio
 	return ApplyFile(ctx, opts.ConfigRoot, ref, func(key, value string) {
 		res.Env.SetWithMeta(env.Entry{
 			Key:      key,
-			Value:   value,
+			Value:    value,
 			Redacted: ref.Redact,
 			Source:   fmt.Sprintf("file:%s", ref.Path),
 		})
@@ -403,7 +403,7 @@ func applySecretDirectives(ctx context.Context, cfg *config.Config, opts ApplyOp
 		for name, ref := range cfg.Directives.Secret {
 			res.Env.SetWithMeta(env.Entry{
 				Key:      name,
-				Value:   fmt.Sprintf("__UNRESOLVED__:%s:%s", ref.Source, ref.Ref),
+				Value:    fmt.Sprintf("__UNRESOLVED__:%s:%s", ref.Source, ref.Ref),
 				Redacted: true,
 				Source:   "secret:unresolved",
 			})
@@ -423,7 +423,7 @@ func applySecretDirectives(ctx context.Context, cfg *config.Config, opts ApplyOp
 		}
 		res.Env.SetWithMeta(env.Entry{
 			Key:      name,
-			Value:   val,
+			Value:    val,
 			Redacted: ref.Redact,
 			Source:   fmt.Sprintf("secret:%s", ref.Source),
 		})
@@ -464,12 +464,12 @@ func MergeStringPath(parts []string) string {
 // metaKeys are top-level keys in envee.toml that are NOT env variables.
 // They are reserved for envee's own use.
 var metaKeys = map[string]bool{
-	"watch":      true,
-	"extends":    true,
-	"required":   true,
-	"schema":     true,
-	"profile":    true,
-	"stop_search_up": true,
+	"watch":               true,
+	"extends":             true,
+	"required":            true,
+	"schema":              true,
+	"profile":             true,
+	"stop_search_up":      true,
 	"profile_from_branch": true,
 }
 

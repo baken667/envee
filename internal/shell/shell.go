@@ -134,7 +134,7 @@ func (BashAdapter) Name() Name { return Bash }
 // Init implements Adapter.
 func (BashAdapter) Init(selfPath string) string {
 	const tpl = `# envee shell hook for bash
-# See https://envee.dev/init for details.
+# See https://github.com/baken667/envee#shell-integration for details.
 _envee_hook() {
   local previous_exit_status=$?
   local out
@@ -454,4 +454,3 @@ func PwshEscape(s string) string {
 	}
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
-

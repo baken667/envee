@@ -50,7 +50,7 @@ func TestMapDiffSetUnset(t *testing.T) {
 	a.Set("Z", "3")
 
 	b := New()
-	b.Set("X", "1") // unchanged
+	b.Set("X", "1")   // unchanged
 	b.Set("Y", "NEW") // changed
 	b.Set("W", "4")   // added
 
