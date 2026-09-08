@@ -9,6 +9,40 @@ the curated view.
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-09-08
+
+### Fixed
+
+- Working nushell and PowerShell hooks. Both previously shipped broken: the
+  nushell hook was a **syntax error** (`{|`, five parse errors) so
+  `envee init nu` produced something that could not be sourced at all, and it
+  ran `nu -c` in a subprocess where env changes cannot persist; the PowerShell
+  hook registered on `PowerShell.OnIdle`, whose `-Action` runs in a separate
+  runspace, so its `$env:` assignments never reached the session.
+
+  Nushell has no `eval`, so `envee eval nu` now emits JSON and the hook feeds
+  it to `load-env`. Two nushell mechanisms make that reach the session, both
+  verified against 0.115: `def --env` propagates a command's env changes to
+  its caller, and an `env_change` hook registered as a *string* is evaluated
+  in the caller's scope where a closure is not. PowerShell wraps the prompt
+  function instead of using an engine event.
+
+### Changed
+
+- `envee eval nu` emits JSON instead of nushell statements, since nushell has
+  no `eval`. Only the shell hook consumes this output, so nothing else is
+  affected.
+- CI installs nushell and asserts the generated hooks parse, so the syntax
+  error that shipped in the nushell hook cannot recur silently.
+
+
+## [0.1.1] — 2026-09-08
+
+First published release. `v0.1.0` was tagged but never published: the
+release pipeline failed fifteen consecutive times and no release object
+was ever created. That tag is left in place because sum.golang.org has
+permanently notarised the module at that version, so it cannot be moved.
+
 ### Security
 
 - **Command injection in `envee eval` (all shells).** `ansiCEscape` emitted
@@ -72,19 +106,6 @@ the curated view.
 
 ### Added
 
-- Working nushell and PowerShell hooks. Both previously shipped broken: the
-  nushell hook was a **syntax error** (`{|`, five parse errors) so
-  `envee init nu` produced something that could not be sourced at all, and it
-  ran `nu -c` in a subprocess where env changes cannot persist; the PowerShell
-  hook registered on `PowerShell.OnIdle`, whose `-Action` runs in a separate
-  runspace, so its `$env:` assignments never reached the session.
-
-  Nushell has no `eval`, so `envee eval nu` now emits JSON and the hook feeds
-  it to `load-env`. Two nushell mechanisms make that reach the session, both
-  verified against 0.115: `def --env` propagates a command's env changes to
-  its caller, and an `env_change` hook registered as a *string* is evaluated
-  in the caller's scope where a closure is not. PowerShell wraps the prompt
-  function instead of using an engine event.
 - `envee check` — real static analysis: missing `_.file`/`_.script`/`_.source`
   targets, secret plugins absent from `$PATH`, unredacted secrets, plaintext
   values whose names look like credentials, reserved `ENVEE_*` keys and
@@ -127,4 +148,6 @@ green, and completions and man pages installed to the right prefixes.
 - `envee trust --sign` (ed25519) is not implemented.
 - The WASM script sandbox (`_.script`) is not implemented.
 
-[Unreleased]: https://github.com/baken667/envee/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/baken667/envee/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/baken667/envee/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/baken667/envee/releases/tag/v0.1.1
