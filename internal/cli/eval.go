@@ -15,7 +15,6 @@ import (
 	"github.com/baken667/envee/internal/plugin"
 	"github.com/baken667/envee/internal/resolver"
 	"github.com/baken667/envee/internal/shell"
-	"github.com/baken667/envee/internal/trust"
 )
 
 // newEvalCmd creates the `envee eval <shell>` command.
@@ -64,12 +63,14 @@ func runEval(cmd *cobra.Command, shellName string) error {
 		return err
 	}
 
-	// 3. Trust gate (skip if ENVEE_BYPASS_TRUST=1, for tests/CI).
-	if os.Getenv("ENVEE_BYPASS_TRUST") != "1" {
-		store := trust.NewStore()
-		if trustErr := store.CheckFile(cfg.Path, cfg.FileHash); trustErr != nil {
-			return errs.Trust(cfg.Path, cfg.FileHash).WithCause(trustErr)
-		}
+	// 3. Trust gate — every contributing file must be approved.
+	//
+	// There is deliberately no environment-variable escape hatch here.
+	// envee exports variables into the user's shell, so an $ENVEE_BYPASS_TRUST
+	// style opt-out could be set by one trusted config and would then disable
+	// the trust check for every other directory in the session.
+	if trustErr := ensureTrusted(cfg); trustErr != nil {
+		return trustErr
 	}
 
 	// 4. Determine profile: flag > env > config default.

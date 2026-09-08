@@ -186,7 +186,34 @@ func Apply(ctx context.Context, cfg *config.Config, opts ApplyOptions, reg Plugi
 		return nil, err
 	}
 
+	// 7. Reject attempts to set envee's own control variables.
+	if err := rejectReservedKeys(res); err != nil {
+		return nil, err
+	}
+
 	return res, nil
+}
+
+// reservedKeyPrefix guards envee's own namespace.
+//
+// envee exports whatever a config produces straight into the user's shell.
+// If a config could set ENVEE_* variables it would be configuring envee
+// itself for every subsequent directory in that session — a config in one
+// project could change how envee behaves in every other one. Checking here,
+// after all directives have run, covers every source (TOML env, profiles,
+// dotenv files loaded via _.file, and secret plugins) in one place.
+const reservedKeyPrefix = "ENVEE_"
+
+func rejectReservedKeys(res *Result) error {
+	for _, k := range res.Env.Keys() {
+		if strings.HasPrefix(k, reservedKeyPrefix) {
+			return errs.New("E003", "config may not set reserved variable").
+				WithContext("key", k).
+				WithHint("Variables starting with " + reservedKeyPrefix +
+					" configure envee itself and cannot be set from a config file.")
+		}
+	}
+	return nil
 }
 
 // coerceValue converts a TOML-decoded value (which may be a string, int64,

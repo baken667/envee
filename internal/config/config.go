@@ -63,6 +63,26 @@ type Config struct {
 	// WatchedPaths are additional files this config depends on.
 	// Populated by the watcher (e.g., dotenv files referenced via _.file).
 	WatchedPaths []string `toml:"-"`
+
+	// Sources lists every config file that contributed to this Config,
+	// in the order they were merged.
+	//
+	// A resolved Config is usually the merge of several files (envee.toml,
+	// envee.local.toml, envee.d/*.toml, parent-directory configs, the global
+	// config). Path/FileHash above describe only the FIRST of them, so trust
+	// checks must iterate Sources instead — otherwise every file after the
+	// first is applied without ever being approved by the user.
+	Sources []SourceFile `toml:"-"`
+}
+
+// SourceFile identifies one config file that contributed to a Config.
+type SourceFile struct {
+	// Path is the absolute path to the file.
+	Path string
+
+	// Hash is the SHA-256 of the file's canonical (re-marshaled) content,
+	// i.e. the same value the trust store records.
+	Hash string
 }
 
 // Profile is a per-profile overlay of env variables and metadata.

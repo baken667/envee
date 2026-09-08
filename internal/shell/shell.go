@@ -172,6 +172,9 @@ func (BashAdapter) Unset(key string) string {
 
 // SetPath implements Adapter.
 func (BashAdapter) SetPath(dirs []string) string {
+	if len(dirs) == 0 {
+		return ""
+	}
 	escaped := make([]string, len(dirs))
 	for i, d := range dirs {
 		escaped[i] = BashEscape(d)
@@ -228,6 +231,9 @@ func (ZshAdapter) Unset(key string) string {
 
 // SetPath implements Adapter.
 func (ZshAdapter) SetPath(dirs []string) string {
+	if len(dirs) == 0 {
+		return ""
+	}
 	escaped := make([]string, len(dirs))
 	for i, d := range dirs {
 		escaped[i] = BashEscape(d)
@@ -276,6 +282,9 @@ func (FishAdapter) Unset(key string) string {
 
 // SetPath implements Adapter.
 func (FishAdapter) SetPath(dirs []string) string {
+	if len(dirs) == 0 {
+		return ""
+	}
 	escaped := make([]string, len(dirs))
 	for i, d := range dirs {
 		escaped[i] = FishEscape(d)
@@ -293,8 +302,13 @@ func FishEscape(s string) string {
 	if s == "" {
 		return "''"
 	}
-	// Wrap in single quotes and escape any single quotes inside.
-	return "'" + strings.ReplaceAll(s, "'", `\'`) + "'"
+	// Inside fish single quotes only \' and \\ are recognised as escapes.
+	// The backslash must be doubled FIRST, otherwise a value ending in a
+	// backslash escapes the closing quote and the rest of the line is
+	// interpreted as code.
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "'", `\'`)
+	return "'" + s + "'"
 }
 
 // ---- nu (nushell) adapter --------------------------------------------------
@@ -330,6 +344,9 @@ func (NuAdapter) Unset(key string) string {
 
 // SetPath implements Adapter.
 func (NuAdapter) SetPath(dirs []string) string {
+	if len(dirs) == 0 {
+		return ""
+	}
 	escaped := make([]string, len(dirs))
 	for i, d := range dirs {
 		escaped[i] = NuEscape(d)
@@ -360,6 +377,8 @@ func NuEscape(s string) string {
 			b.WriteString(`\$`)
 		case '\n':
 			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
 		case '\t':
 			b.WriteString(`\t`)
 		default:
@@ -409,11 +428,18 @@ func (PwshAdapter) Unset(key string) string {
 
 // SetPath implements Adapter.
 func (PwshAdapter) SetPath(dirs []string) string {
+	if len(dirs) == 0 {
+		return ""
+	}
+	// PwshEscape returns a single-quoted PowerShell literal. Concatenate
+	// those literals with the separator rather than nesting them inside a
+	// double-quoted string, which would put the quote characters themselves
+	// into PATH.
 	escaped := make([]string, len(dirs))
 	for i, d := range dirs {
 		escaped[i] = PwshEscape(d)
 	}
-	return "$env:PATH = \"" + strings.Join(escaped, ";") + ";$env:PATH\""
+	return "$env:PATH = " + strings.Join(escaped, " + ';' + ") + " + ';' + $env:PATH"
 }
 
 // Escape implements Adapter.

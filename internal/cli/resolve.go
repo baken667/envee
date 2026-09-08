@@ -58,6 +58,12 @@ func runResolve(cmd *cobra.Command, jsonOut bool, shellName string, includeOS, d
 		return err
 	}
 
+	// Trust gate — directive.Apply below can run secret plugins and other
+	// side-effecting directives, so it must not touch an unapproved config.
+	if trustErr := ensureTrusted(cfg); trustErr != nil {
+		return trustErr
+	}
+
 	osEnv := envToMap(os.Environ())
 	dispatcher, _ := plugin.DiscoverAndLoad(cmd.Context())
 	result, err := directive.Apply(cmd.Context(), cfg, directive.ApplyOptions{
