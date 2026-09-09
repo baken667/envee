@@ -1,0 +1,11 @@
+# Sources are LF everywhere. Without this, git on Windows checks out CRLF and
+# `zig fmt --check` reports every file as unformatted (CI, windows-latest).
+* text=auto eol=lf
+*.zig text eol=lf
+*.zon text eol=lf
+*.sh text eol=lf
+*.toml text eol=lf
+*.env text eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
