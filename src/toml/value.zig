@@ -254,10 +254,13 @@ fn appendJsonString(gpa: Allocator, out: *std.ArrayList(u8), s: []const u8) Cano
 }
 
 /// Хеш канонического вида: `"sha256:<hex>"`.
-pub fn canonicalHash(gpa: Allocator, root: *const Table) CanonicalError![]u8 {
+pub fn canonicalHash(gpa: Allocator, root: *const Table) Allocator.Error![]u8 {
     var aw: Writer.Allocating = .init(gpa);
     defer aw.deinit();
-    try writeCanonical(gpa, &aw.writer, root);
+    // Writer здесь свой и пишет в память, поэтому единственная настоящая
+    // причина отказа — нехватка памяти. Сужаем тип, чтобы ошибка записи не
+    // расползалась по сигнатурам всех вызывающих.
+    writeCanonical(gpa, &aw.writer, root) catch return error.OutOfMemory;
 
     var digest: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(aw.written(), &digest, .{});
