@@ -100,7 +100,7 @@ pub const Store = struct {
         // не сойдётся; не притворяемся, что понимаем их.
         if (entry.version < entry_version) return .unknown;
 
-        if (entry.expires_at.len > 0) {
+        if (hasExpiry(entry)) {
             const expires = parseRfc3339(entry.expires_at) orelse return .unknown;
             if (s.now_ns > expires) return .expired;
         }
@@ -250,6 +250,14 @@ pub const Store = struct {
     }
 };
 
+/// Нулевое время Go: так `time.Time{}` уходит в JSON, и `omitempty` его не
+/// убирает. Для нас это то же самое, что отсутствие срока.
+pub const go_zero_time = "0001-01-01T00:00:00Z";
+
+pub fn hasExpiry(e: Entry) bool {
+    return e.expires_at.len > 0 and !std.mem.eql(u8, e.expires_at, go_zero_time);
+}
+
 fn newestFirst(_: void, a: Entry, b: Entry) bool {
     return std.mem.order(u8, a.trusted_at, b.trusted_at) == .gt;
 }
@@ -274,7 +282,7 @@ fn pathHash(p: []const u8) [64]u8 {
 // ---- сериализация ----------------------------------------------------------
 
 /// Пишет запись в том же виде, что и Go: отступ в два пробела, порядок полей
-/// как в структуре, пустые необязательные поля опускаются.
+/// как в структуре, пустой `comment` опускается.
 pub fn writeEntryJson(w: *Writer, e: Entry) Writer.Error!void {
     try w.writeAll("{\n");
     var first = true;
@@ -291,9 +299,10 @@ pub fn writeEntryJson(w: *Writer, e: Entry) Writer.Error!void {
         try w.writeAll("\n  }");
         first = false;
     }
-    if (e.expires_at.len > 0) {
-        try field(w, &first, "expires_at", e.expires_at);
-    }
+    // `expires_at` пишется всегда, как в Go: там это `time.Time`, у которого
+    // нет пустого значения, и бессрочная запись несёт нулевое время. Так
+    // файлы обеих реализаций читаются друг другом.
+    try field(w, &first, "expires_at", if (e.expires_at.len > 0) e.expires_at else go_zero_time);
     try field(w, &first, "trusted_at", e.trusted_at);
     try field(w, &first, "file_hash", e.file_hash);
     try field(w, &first, "file_path", e.file_path);
@@ -668,7 +677,7 @@ test "TTL parsing" {
     try testing.expect(parseTtl("24") == null);
 }
 
-test "the serialized entry omits empty optional fields" {
+test "the serialized entry matches the Go layout" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -683,6 +692,7 @@ test "the serialized entry omits empty optional fields" {
     });
     try testing.expectEqualStrings(
         \\{
+        \\  "expires_at": "0001-01-01T00:00:00Z",
         \\  "trusted_at": "2026-09-09T00:00:00Z",
         \\  "file_hash": "sha256:abc",
         \\  "file_path": "/p/envee.toml",
@@ -693,10 +703,35 @@ test "the serialized entry omits empty optional fields" {
         \\
     , aw.written());
 
-    // И читается обратно.
+    // И читается обратно; нулевое время — это «бессрочно».
     const back = try parseEntry(a, aw.written());
     try testing.expectEqualStrings("sha256:abc", back.file_hash);
-    try testing.expect(back.expires_at.len == 0);
+    try testing.expect(!hasExpiry(back));
+}
+
+// Запись с нулевым временем Go не должна считаться просроченной с 1970 года.
+test "the Go zero time means no expiry" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const ts = try TempStore.create(a, base_now);
+    defer ts.destroy();
+
+    _ = try std.Io.Dir.cwd().createDirPathStatus(test_io, ts.root, .fromMode(0o700));
+    const path = try std.fs.path.join(a, &.{ ts.root, "zero.json" });
+    try std.Io.Dir.cwd().writeFile(test_io, .{
+        .sub_path = path,
+        .data =
+        \\{
+        \\  "expires_at": "0001-01-01T00:00:00Z",
+        \\  "trusted_at": "2026-01-01T00:00:00Z",
+        \\  "file_hash": "sha256:zero",
+        \\  "file_path": "/p/envee.toml",
+        \\  "version": 2
+        \\}
+        ,
+    });
+    try testing.expectEqual(Status.trusted, try ts.store.status(a, "/p/envee.toml", "sha256:zero"));
 }
 
 test "deny entries live under their own directory" {

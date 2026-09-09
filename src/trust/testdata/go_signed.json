@@ -1,0 +1,15 @@
+{
+  "signature": {
+    "signed_at": "2026-09-09T10:00:00Z",
+    "algorithm": "ed25519",
+    "key_id": "sha256:d1667dba6124d013c083dbf36304364cc47615101917939fc64239af10b72835",
+    "value": "uTBqJ2nstPKjtf+ttIAG2IFjX6CkGk05V1vKjWOoKdPEz1nQwMcd6+Qseko4hymq7huFw+5/s+KqJgPeBvbjCQ=="
+  },
+  "expires_at": "0001-01-01T00:00:00Z",
+  "trusted_at": "2026-09-08T12:00:00Z",
+  "file_hash": "sha256:abc123",
+  "file_path": "/home/alice/proj/envee.toml",
+  "trusted_by": "alice",
+  "tool_version": "0.2.0",
+  "version": 1
+}
