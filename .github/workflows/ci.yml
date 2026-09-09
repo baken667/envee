@@ -3,256 +3,80 @@ name: CI
 on:
   push:
     # staging is the integration branch: work lands there first and is only
-    # promoted to main once a release candidate has been exercised. Without it
-    # here, direct pushes to staging ran no CI at all.
+    # promoted to main once a release candidate has been exercised.
     branches: [main, staging]
-  # No `branches:` filter here. Restricting to PRs targeting main meant a
-  # stacked pull request (one whose base is another feature branch) got no
-  # checks at all, so the work in it went unverified until the branch below
-  # it merged.
+  # No `branches:` filter: a stacked pull request (one whose base is another
+  # feature branch) must get checks too.
   pull_request:
 
 permissions:
   contents: read
   pull-requests: read
 
-env:
-  GO_VERSION: "1.24"
-  GORELEASER_VERSION: "v1.26.2"
-
 jobs:
-  # ---- Test matrix ----------------------------------------------------------
-
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     defaults:
       run:
-        # The race branch below is POSIX shell; windows-latest defaults to
-        # pwsh, which would not understand it.
         shell: bash
     strategy:
       fail-fast: false
       matrix:
-        # Architecture comes from the runner, not from a matrix variable:
-        # ubuntu-latest is linux/amd64 and macos-latest is darwin/arm64.
-        # The previous `arch: [amd64, arm64]` dimension was never consumed and
-        # simply ran every configuration twice. Real cross-architecture
-        # coverage lives in the cross-compile job below.
         os: [ubuntu-latest, macos-latest, windows-latest]
-        include:
-          # The race detector is slow; one representative platform is enough.
-          - os: ubuntu-latest
-            race: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: go.mod must not outpace the toolchain CI uses
-        # `go get` silently raises the `go` directive to whatever a new
-        # dependency demands. That quietly drops users on older toolchains,
-        # and it surfaces as confusing breakage rather than a clear error:
-        # a directive of 1.26 against GO_VERSION 1.24 produced
-        # `go: no such tool "covdata"` and a golangci-lint config-load
-        # failure, neither of which names the real cause.
-        shell: bash
-        run: |
-          declared=$(awk '/^go /{print $2; exit}' go.mod)
-          if [ "${declared%.*}" != "${GO_VERSION}" ]; then
-            echo "go.mod declares go $declared but CI builds with $GO_VERSION."
-            echo "Either pin the dependency that raised it, or raise GO_VERSION"
-            echo "and the README deliberately -- it is a compatibility change."
-            exit 1
-          fi
-
-      - name: Download modules
-        run: go mod download
-
-      - name: Run tests
-        run: |
-          if [ "${{ matrix.race }}" = "true" ]; then
-            CGO_ENABLED=1 go test -race -shuffle=on -coverprofile=coverage.out ./...
-          else
-            go test -shuffle=on ./...
-          fi
-
-      - name: Upload coverage (race-only)
-        if: matrix.race
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-${{ matrix.os }}
-          path: coverage.out
-
-  # ---- Cross-compilation ----------------------------------------------------
-
-  cross-compile:
-    name: Cross-compile (${{ matrix.goos }}/${{ matrix.goarch }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # Mirrors the builds: matrix in .goreleaser.yaml, including the
-        # windows/arm64 ignore and the fact that enveed is linux+darwin only.
-        # A divergence here is a divergence in the release.
-        include:
-          - { goos: linux, goarch: amd64 }
-          - { goos: linux, goarch: arm64 }
-          - { goos: darwin, goarch: amd64 }
-          - { goos: darwin, goarch: arm64 }
-          - { goos: windows, goarch: amd64 }
-    env:
-      CGO_ENABLED: "0"
-      GOOS: ${{ matrix.goos }}
-      GOARCH: ${{ matrix.goarch }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+          version: 0.16.0
 
-      - name: Build envee
-        run: go build -trimpath -o /dev/null ./cmd/envee
-
-      - name: Build enveed
-        if: matrix.goos != 'windows'
-        run: go build -trimpath -o /dev/null ./cmd/enveed
-
-      - name: Vet
-        # Per-GOOS vet type-checks the build-tag-excluded files (the flock
-        # helpers) that a host-only build never compiles.
-        run: go vet ./...
-
-  # ---- Shell hook syntax ----------------------------------------------------
-
-  shell-hooks:
-    name: Shell hook syntax
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Install nushell, fish and zsh
-        # Both hooks shipped broken, and in both cases the shell was missing
-        # from the runner so the test that would have caught it skipped:
-        #
-        #   nushell - the generated hook was a syntax error, five parse errors,
-        #             so `envee init nu` produced something unsourceable.
-        #   fish    - command substitution splits output into a list and eval
-        #             joins it with spaces, so the hook set only the first
-        #             variable and swallowed the rest into its value.
-        #
-        # A skipped test is indistinguishable from a passing one in the summary,
-        # which is how both reached a release. Install the shells here and fail
-        # below if any is absent.
-        #
-        # bash and PowerShell need no step; zsh does, despite the assumption
-        # that it is standard — the presence guard below caught that.
+      - name: Install fish, zsh and nushell (Linux)
+        # The hook tests run the generated hooks in real shells and skip when
+        # a shell is missing; a skipped test looks like a passing one, so at
+        # least one platform must have every shell installed and fail here if
+        # any is absent.
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh
-          fish --version
-          zsh --version
           version=0.115.1
           curl -sSfL -o /tmp/nu.tar.gz \
             "https://github.com/nushell/nushell/releases/download/${version}/nu-${version}-x86_64-unknown-linux-gnu.tar.gz"
           tar -xzf /tmp/nu.tar.gz -C /tmp
           sudo install "/tmp/nu-${version}-x86_64-unknown-linux-gnu/nu" /usr/local/bin/nu
-          nu --version
-
-      - name: Verify the generated hooks parse and apply the environment
-        # Fails rather than skips if any shell went missing -- a skipped hook
-        # test looks exactly like a passing one.
-        run: |
           for sh in bash zsh fish nu pwsh; do
             command -v "$sh" >/dev/null || { echo "$sh is not installed; the hook tests would silently skip"; exit 1; }
           done
-          go test ./internal/shell/ -run 'TestNuInit|TestPwshInit|TestHookApplies|TestFishHook|TestFastPath|TestRenderFastPath|TestHookPreserves' -v
 
-  # ---- Lint -----------------------------------------------------------------
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          # The lint action manages its own cache; enabling both makes them
-          # fight over the same keys.
-          cache: false
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          # v8 requires golangci-lint v2, which is what .golangci.yml targets.
-          # Pinned to a minor so a new upstream check cannot turn main red
-          # without a commit here.
-          version: v2.1
-          args: --timeout=5m
-
-  # ---- Smoke test of built binary ------------------------------------------
-
-  build-smoke:
-    name: Build & smoke test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+      - name: zig fmt
+        run: zig fmt --check src build.zig
 
       - name: Build
+        run: zig build -Dversion=ci
+
+      - name: Test
+        # Windows is build-only for now: the test suite drives POSIX shells
+        # and file modes. Cross-compilation for windows is covered below.
+        if: runner.os != 'Windows'
+        run: zig build test --summary all
+
+      - name: Smoke
+        if: runner.os != 'Windows'
         run: |
-          CGO_ENABLED=0 go build -trimpath \
-            -ldflags="-s -w -X github.com/baken667/envee/internal/version.Version=ci" \
-            -o ./bin/envee ./cmd/envee
-          CGO_ENABLED=0 go build -trimpath \
-            -ldflags="-s -w -X github.com/baken667/envee/internal/version.Version=ci" \
-            -o ./bin/enveed ./cmd/enveed
-
-      - name: Smoke version
-        run: |
-          ./bin/envee --version | grep -q "ci" || (echo "ldflags did not reach the binary"; exit 1)
-
-      - name: Smoke help
-        run: ./bin/envee --help
-
-      - name: Smoke init bash
-        run: |
-          out=$(./bin/envee init bash)
-          echo "$out" | grep -q "_envee_hook" || (echo "missing hook"; exit 1)
-          echo "$out" | grep -q "PROMPT_COMMAND" || (echo "missing PROMPT_COMMAND"; exit 1)
-
-      - name: Smoke init zsh
-        run: |
-          out=$(./bin/envee init zsh)
-          echo "$out" | grep -q "add-zsh-hook" || (echo "missing add-zsh-hook"; exit 1)
-
-      - name: Smoke init fish
-        run: |
-          out=$(./bin/envee init fish)
-          echo "$out" | grep -q "function _envee_hook" || (echo "missing fish hook"; exit 1)
-
-      - name: Smoke check
-        run: ./bin/envee check examples/basic/envee.toml
+          ./zig-out/bin/envee version | grep -q "ci" || (echo "build options did not reach the binary"; exit 1)
+          ./zig-out/bin/envee --help >/dev/null
+          ./zig-out/bin/envee-plugin-env metadata | grep -q '"name":"env"'
+          for f in examples/*/envee.toml; do ./zig-out/bin/envee check "$f"; done
 
       - name: Untrusted eval must be refused
         # The whole point of the trust model. Exit code 3 is "trust required"
         # per docs/adr/0017-error-ux.md.
+        if: runner.os != 'Windows'
         working-directory: ./examples/basic
         run: |
           set +e
-          ../../bin/envee eval bash >/dev/null 2>&1
+          ../../zig-out/bin/envee eval bash >/dev/null 2>&1
           code=$?
           set -e
           if [ "$code" -ne 3 ]; then
@@ -261,68 +85,53 @@ jobs:
           fi
 
       - name: Trusted eval exports the expected variables
+        if: runner.os != 'Windows'
         working-directory: ./examples/basic
         run: |
-          ../../bin/envee trust --yes
-          out=$(../../bin/envee eval bash)
+          ../../zig-out/bin/envee trust --yes
+          out=$(../../zig-out/bin/envee eval bash)
           echo "$out" | grep -q "SERVICE_NAME" || (echo "missing SERVICE_NAME"; exit 1)
           # Values must survive a real shell round trip without executing.
           eval "$out"
           [ "$SERVICE_NAME" = "myapp" ] || (echo "SERVICE_NAME=$SERVICE_NAME"; exit 1)
 
-      - name: Upload binaries
-        uses: actions/upload-artifact@v4
-        with:
-          name: envee-binaries
-          path: bin/
-
-  # ---- GoReleaser dry-run --------------------------------------------------
-
-  goreleaser-check:
-    name: GoReleaser config check
+  release-build:
+    name: Release build (all targets)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
         with:
-          fetch-depth: 0 # goreleaser needs history for the changelog
+          version: 0.16.0
+
+      - name: Cross-compile every release target
+        # The same command release.yml runs. A target missing here is a
+        # target missing from the release.
+        run: zig build release -Dversion=ci -Dcommit=${GITHUB_SHA::7}
+
+      - name: List
+        run: find zig-out/release -type f | sort
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: envee-release
+          path: zig-out/release/
+
+  sdk-go:
+    name: Go plugin SDK
+    # pkg/sdk-go is its own module: the SDK for plugin authors stays in Go
+    # while the core does not (ADR-0019).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pkg/sdk-go
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Install syft
-        # The snapshot below builds SBOMs, same as the real release. Without
-        # this the PR check would stop covering that step.
-        uses: anchore/sbom-action/download-syft@v0
-
-      - name: Install GoReleaser (v1.x)
-        # Pinned to the same version the release workflow resolves to, so this
-        # job actually validates what will ship. v1.26.2 is the last v1
-        # release and matches the v1 schema in the goreleaser configs.
-        run: |
-          curl -sSfL -o /tmp/gr.tar.gz \
-            "https://github.com/goreleaser/goreleaser/releases/download/${GORELEASER_VERSION}/goreleaser_Linux_x86_64.tar.gz"
-          tar -xzf /tmp/gr.tar.gz -C /tmp
-          sudo mv /tmp/goreleaser /usr/local/bin/goreleaser
-          goreleaser --version
-
-      - name: Check (main)
-        run: goreleaser check --config .goreleaser.yaml
-
-      - name: Check (staging)
-        run: goreleaser check --config .goreleaser.staging.yaml
-
-      - name: Snapshot build (main config)
-        # `goreleaser check` validates the schema only. It does not resolve
-        # archives.files globs, run nfpm, or render the Homebrew formula --
-        # which is why fifteen consecutive release runs failed on things a
-        # snapshot would have caught in ninety seconds on a PR.
-        #
-        # --skip=sign because keyless cosign needs the release workflow's
-        # OIDC token, which a PR job does not have.
-        run: goreleaser release --snapshot --clean --skip=sign,publish,announce
-
-      - name: Show the generated Homebrew formula
-        # This is the file that gets force-pushed to the tap. Make it visible
-        # in PR logs before it lands there.
-        run: cat dist/homebrew/Formula/envee.rb || true
+          go-version: "1.24"
+          cache-dependency-path: pkg/sdk-go/go.sum
+      - run: gofmt -l . && test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -shuffle=on ./...

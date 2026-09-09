@@ -1,68 +1,158 @@
 name: Release
 
+# A tag builds every target with `zig build release`, packs archives, signs
+# the checksum file with keyless cosign, publishes the GitHub release and
+# pushes the Homebrew formula to the tap.
+#
+# Stable tags (v0.4.0) go to baken667/homebrew-tap. Pre-release tags
+# (v0.4.0-rc.1, -beta.N, -alpha.N) are marked as pre-releases and go to
+# baken667/homebrew-tap-staging, so a release candidate can be exercised with
+# `brew install baken667/tap-staging/envee` before it reaches users.
+#
+# Required secrets:
+#   HOMEBREW_TAP_TOKEN          PAT with `repo` scope on baken667/homebrew-tap
+#   HOMEBREW_TAP_STAGING_TOKEN  same, on baken667/homebrew-tap-staging
+#
+# A tag can never be moved once pushed: users verify archives against the
+# signed checksums.txt of that tag. A wrong release means the next patch.
+
 on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
-    inputs:
-      snapshot:
-        description: "Build a snapshot release (no publish)"
-        required: false
-        default: "false"
 
 permissions:
-  contents: write # create releases
+  contents: write # create the release
   id-token: write # keyless cosign signing via Sigstore/Fulcio
 
 jobs:
   release:
     name: Build, sign, and publish
-    # A tag like v0.1.1-rc.1 matches this workflow's `v*` filter AND
-    # release-staging.yml's `v*-rc.*` filter, so both would run: two jobs
-    # racing to create the same GitHub release, with the pre-release pushed
-    # to the production tap. GitHub tag filters cannot express negation, so
-    # the exclusion has to live here.
-    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history for changelog
+          fetch-depth: 0
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: mlugg/setup-zig@v2
         with:
-          go-version: "1.24"
-          cache: true
+          version: 0.16.0
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
-      - name: Install syft
-        # goreleaser shells out to syft for the per-archive SBOMs. `goreleaser
-        # check` does not verify that it exists, so a missing syft would only
-        # surface as a failed release.
-        uses: anchore/sbom-action/download-syft@v0
+      - name: Version from the tag
+        id: meta
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
 
-      - name: Run GoReleaser
-        # v5 of the action installs GoReleaser v1.x, which matches the v1
-        # schema in .goreleaser.yaml. The v6 action (GoReleaser v2.x) would
-        # force a migration to homebrew_casks — see
-        # docs/adr/0014-homebrew-distribution.md.
-        #
-        # Pinned to the same version ci.yml installs for `goreleaser check`,
-        # so the PR check and the release cannot drift apart.
-        uses: goreleaser/goreleaser-action@v5
-        with:
-          version: "~> v1.26"
-          args: >-
-            ${{ inputs.snapshot == 'true'
-                && 'release --snapshot --clean --skip=sign,publish,announce'
-                || 'release --clean' }}
+      - name: Build every target
+        run: |
+          zig build release \
+            -Dversion="${{ steps.meta.outputs.version }}" \
+            -Dcommit="${GITHUB_SHA::7}" \
+            -Ddate="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          find zig-out/release -type f | sort
+
+      - name: Pack archives
+        # Same names goreleaser produced for 0.3.x, so existing download
+        # scripts keep working: envee_<version>_<os>_<arch>.tar.gz (zip on
+        # windows), each holding both binaries plus LICENSE and README.
+        run: |
+          version="${{ steps.meta.outputs.version }}"
+          mkdir -p dist
+          pack() {
+            local triple="$1" os="$2" arch="$3"
+            local name="envee_${version}_${os}_${arch}"
+            local stage="dist/$name"
+            mkdir -p "$stage"
+            cp LICENSE README.md CHANGELOG.md "$stage/"
+            if [ "$os" = "windows" ]; then
+              cp "zig-out/release/$triple/envee.exe" "zig-out/release/$triple/envee-plugin-env.exe" "$stage/"
+              (cd dist && zip -qr "$name.zip" "$name")
+            else
+              cp "zig-out/release/$triple/envee" "zig-out/release/$triple/envee-plugin-env" "$stage/"
+              tar -C dist -czf "dist/$name.tar.gz" "$name"
+            fi
+            rm -rf "$stage"
+          }
+          pack x86_64-linux-musl  linux   amd64
+          pack aarch64-linux-musl linux   arm64
+          pack x86_64-macos       darwin  amd64
+          pack aarch64-macos      darwin  arm64
+          pack x86_64-windows     windows amd64
+          (cd dist && sha256sum envee_* > checksums.txt && cat checksums.txt)
+
+      - name: Sign the checksums (keyless)
+        # No key material anywhere: cosign exchanges the job's OIDC token for
+        # a short-lived Fulcio certificate and records the signature in the
+        # Rekor transparency log. The .pem is uploaded so users can verify:
+        #   cosign verify-blob --certificate checksums.txt.pem \
+        #     --signature checksums.txt.sig \
+        #     --certificate-identity-regexp 'github.com/baken667/envee' \
+        #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+        #     checksums.txt
+        run: |
+          cosign sign-blob --yes --oidc-provider=github-actions \
+            --output-signature dist/checksums.txt.sig \
+            --output-certificate dist/checksums.txt.pem \
+            dist/checksums.txt
+
+      - name: Smoke the linux/amd64 archive
+        run: |
+          tmp="$(mktemp -d)"
+          tar -xzf "dist/envee_${{ steps.meta.outputs.version }}_linux_amd64.tar.gz" -C "$tmp"
+          bin="$tmp/envee_${{ steps.meta.outputs.version }}_linux_amd64"
+          "$bin/envee" --version | grep -q "${{ steps.meta.outputs.version }}"
+          "$bin/envee" init bash | grep -q _envee_hook
+          "$bin/envee" check examples/basic/envee.toml
+          "$bin/envee-plugin-env" metadata | grep -q '"name":"env"'
+
+      - name: Publish the GitHub release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          # No COSIGN_KEY / COSIGN_PASSWORD: signing is keyless and uses the
-          # OIDC token granted by `id-token: write` above.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          args=(--generate-notes --title "${GITHUB_REF_NAME}")
+          if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then args+=(--prerelease); fi
+          gh release create "${GITHUB_REF_NAME}" "${args[@]}" dist/*
+
+      - name: Render the Homebrew formula
+        run: |
+          version="${{ steps.meta.outputs.version }}"
+          sha() { grep " envee_${version}_$1.tar.gz" dist/checksums.txt | cut -d' ' -f1; }
+          sed -e "s/__VERSION__/$version/g" \
+              -e "s/__SHA_DARWIN_ARM64__/$(sha darwin_arm64)/" \
+              -e "s/__SHA_DARWIN_AMD64__/$(sha darwin_amd64)/" \
+              -e "s/__SHA_LINUX_ARM64__/$(sha linux_arm64)/" \
+              -e "s/__SHA_LINUX_AMD64__/$(sha linux_amd64)/" \
+              packaging/homebrew/envee.rb.tmpl > dist/envee.rb
+          grep -q "__" dist/envee.rb && { echo "unfilled placeholder in the formula"; exit 1; }
+          cat dist/envee.rb
+
+      - name: Push the formula to the tap
+        env:
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAP_STAGING_TOKEN: ${{ secrets.HOMEBREW_TAP_STAGING_TOKEN }}
+        run: |
+          if [ "$PRERELEASE" = "true" ]; then
+            repo="baken667/homebrew-tap-staging"; token="$TAP_STAGING_TOKEN"
+          else
+            repo="baken667/homebrew-tap"; token="$TAP_TOKEN"
+          fi
+          if [ -z "$token" ]; then echo "no token for $repo; skipping the formula push"; exit 0; fi
+          git clone --depth 1 "https://x-access-token:${token}@github.com/${repo}.git" tap
+          mkdir -p tap/Formula
+          cp dist/envee.rb tap/Formula/envee.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/envee.rb
+          git commit -m "envee ${{ steps.meta.outputs.version }}" || { echo "formula unchanged"; exit 0; }
+          git push

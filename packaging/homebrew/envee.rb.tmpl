@@ -1,0 +1,54 @@
+# Homebrew formula for envee, rendered by .github/workflows/release.yml on
+# every tag and pushed to baken667/homebrew-tap (or -staging for pre-releases).
+# Prebuilt archives per platform; nothing is compiled on the user's machine.
+class Envee < Formula
+  desc "Per-directory environment variable manager"
+  homepage "https://github.com/baken667/envee"
+  version "__VERSION__"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/baken667/envee/releases/download/v__VERSION__/envee___VERSION___darwin_arm64.tar.gz"
+      sha256 "__SHA_DARWIN_ARM64__"
+    end
+    on_intel do
+      url "https://github.com/baken667/envee/releases/download/v__VERSION__/envee___VERSION___darwin_amd64.tar.gz"
+      sha256 "__SHA_DARWIN_AMD64__"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/baken667/envee/releases/download/v__VERSION__/envee___VERSION___linux_arm64.tar.gz"
+      sha256 "__SHA_LINUX_ARM64__"
+    end
+    on_intel do
+      url "https://github.com/baken667/envee/releases/download/v__VERSION__/envee___VERSION___linux_amd64.tar.gz"
+      sha256 "__SHA_LINUX_AMD64__"
+    end
+  end
+
+  def install
+    bin.install "envee"
+    bin.install "envee-plugin-env"
+    generate_completions_from_executable(bin/"envee", "completion")
+  end
+
+  def caveats
+    <<~EOS
+      To enable envee in your shell, add one of these to your config:
+        bash:  eval "$(envee init bash)"
+        zsh:   eval "$(envee init zsh)"
+        fish:  envee init fish | source
+    EOS
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/envee --version")
+    assert_match "_envee_hook", shell_output("#{bin}/envee init bash")
+    assert_match "add-zsh-hook", shell_output("#{bin}/envee init zsh")
+    assert_match "_envee_hook", shell_output("#{bin}/envee init fish")
+    assert_match "\"name\":\"env\"", shell_output("#{bin}/envee-plugin-env metadata")
+  end
+end

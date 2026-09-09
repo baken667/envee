@@ -17,59 +17,61 @@ Worth reading before you start:
 
 ## Development
 
-```bash
-make build        # ./bin/envee and ./bin/enveed
-make test         # unit tests
-make test-race    # with the race detector
-make lint         # golangci-lint (v2 — `brew install golangci-lint`)
-make examples     # static-check every example config
-```
-
-Before pushing, the same three things CI will run:
+Zig 0.16.0 exactly — `build.zig.zon` pins it and CI installs that version.
 
 ```bash
-go test -race -shuffle=on ./...
-golangci-lint run
-gofmt -l .
+zig build                        # ./zig-out/bin/envee and envee-plugin-env
+zig build test --summary all     # unit tests
+zig fmt --check src build.zig
+zig build release                # every release target into zig-out/release/
+make examples                    # static-check every example config
 ```
 
-To exercise the release pipeline without publishing anything:
+Before pushing, the same things CI will run:
 
 ```bash
-# goreleaser must be v1.x; v2 rejects this repo's config schema.
-make release-snapshot
-cat dist/homebrew/Formula/envee.rb
+zig fmt --check src build.zig
+zig build test --summary all
+zig build release
+(cd pkg/sdk-go && go test ./...)   # only if you touched the Go SDK
 ```
 
-CI runs the same snapshot on every pull request, so a release-config mistake
-surfaces on the PR rather than on a tag.
+Look up std APIs in the installed standard library, not from memory: 0.16
+moved a lot (`std.Io`, explicit `io` parameters, unmanaged containers).
+
+```bash
+grep -rn "pub fn createFile" "$(zig env | sed -n 's/.*"lib_dir": "\(.*\)",/\1/p')/std/Io/Dir.zig"
+```
 
 ## House rules
 
-**Errors.** Every user-facing error is an `*errs.Error` with a stable code, a
-hint and a doc link. New codes go in [docs/errors.md](docs/errors.md) and get
-an exit-code mapping in `internal/cli/root.go`.
+**Errors.** Every user-facing error goes through `errs.fail(...)` with a
+stable code, a hint and a doc link (`src/errs.zig`). New codes go in
+[docs/errors.md](docs/errors.md) and get an exit-code mapping in
+`errs.Code.exitCode`.
 
 **Unimplemented commands must fail.** A command that prints "not implemented"
-and exits 0 makes scripts and CI pass vacuously. Use `notImplemented(...)` and
-mark the command `Hidden: true`.
+and exits 0 makes scripts and CI pass vacuously. Use `notImplemented(...)` in
+`src/cli/root.zig` and mark the command `.hidden = true`.
 
-**Shell escaping.** Anything emitted into shell code needs a round-trip test in
-`internal/shell/escape_roundtrip_test.go` that runs a real shell and compares
-bytes. A value from a `.env` must never be able to execute.
+**Shell escaping.** Anything emitted into shell code needs a round-trip test
+in `src/shell/escape.zig` that runs a real shell and compares bytes. A value
+from a `.env` must never be able to execute.
 
-**Trust.** Any command that applies directives must gate on `ensureTrusted`,
-which checks every file that contributed to the config — not just the first.
+**Trust.** Any command that applies directives must go through
+`context.resolveEnv`, which checks every file that contributed to the config
+— not just the first — before anything with side effects runs.
 
-**No new dependencies** without a note in the PR describing why the standard
-library is not enough.
+**No dependencies.** The standard library is enough so far (TOML parser,
+OpenSSH key parsing, JSON, ed25519 all included). A `build.zig.zon`
+dependency needs a note in the PR describing why.
 
-**Watch the `go` directive.** `go get` raises it to whatever a new dependency
-demands, which silently drops users on older toolchains. `golang.org/x/crypto`
-and `golang.org/x/sys` are pinned for exactly this reason — the current
-releases require Go 1.26. CI fails if `go.mod` outpaces the toolchain it
-builds with; raising the minimum Go version is a deliberate compatibility
-decision, not a side effect of adding a dependency.
+**Comments explain why.** Doc comments and inline comments say what a reader
+could not work out from the code: the reason, the trade-off, the bug it
+prevents. Tests are named as sentences describing the behaviour.
+
+**Windows is experimental.** It must compile (`zig build release` covers it);
+it does not have to pass tests yet. Use `src/perms.zig` for file modes.
 
 ## Commits
 
@@ -96,25 +98,21 @@ candidate.
 
 Maintainers only.
 
-Pre-release tags (`-rc.N`, `-beta.N`, `-alpha.N`) are cut from `staging` and
-publish to [`baken667/homebrew-tap-staging`](https://github.com/baken667/homebrew-tap-staging):
+A tag triggers `.github/workflows/release.yml`: `zig build release` builds
+every target, the workflow packs archives, writes `checksums.txt`, signs it
+with keyless cosign, publishes the GitHub release and pushes the Homebrew
+formula to the tap. Pre-release tags (`-rc.N`, `-beta.N`, `-alpha.N`) go to
+[`baken667/homebrew-tap-staging`](https://github.com/baken667/homebrew-tap-staging)
+and are marked as pre-releases; stable tags go to the production tap.
 
 ```bash
-git tag -a v0.3.0-rc.1 -m "..." && git push origin v0.3.0-rc.1
+git tag -a v0.4.0-rc.1 -m "..." && git push origin v0.4.0-rc.1
 brew install baken667/tap-staging/envee   # exercise it for real
 ```
 
-Stable tags are cut from `main` after `staging` merges, and publish to the
-production tap. `release.yml` skips any tag containing `-`, so a release
-candidate cannot accidentally trigger a production release — the two workflows
-would otherwise race on the same GitHub release.
+The formula template lives in `packaging/homebrew/envee.rb.tmpl`; the
+workflow fills in the version and per-archive checksums.
 
-The staging config deliberately omits signing, Linux packages and SBOMs; it
-exists to exercise the build, the GitHub release and the formula push. Keep its
-`brews.test` block in sync with the production one, or the pre-release channel
-verifies less than the thing it is meant to de-risk.
-
-Note that a tag can never be moved once pushed: `sum.golang.org` notarises the
-module at that version permanently, and re-tagging breaks
-`go install ...@vX.Y.Z` for everyone with an unfixable checksum mismatch. If a
-release is wrong, ship the next patch version.
+A tag can never be moved once pushed: users verify archives against the
+signed `checksums.txt` of that tag. If a release is wrong, ship the next
+patch version.
