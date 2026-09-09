@@ -1,17 +1,15 @@
 //! `envee secret set|unset|list|get` — локальное хранилище секретов, из
 //! которого читает `envee-plugin-env`.
 //!
-//! Порт `internal/cli/secret.go`. Хранилище — JSON-объект «ключ → строка»
-//! в `$XDG_DATA_HOME/envee/secrets/env.json` (или `~/.local/share/...`),
-//! режим 0600. Путь нарочно повторяет Go-плагин, а не `paths.zig`: файл
-//! читают две программы, и договориться о месте они должны буквально.
+//! Порт `internal/cli/secret.go`. Само хранилище — в `secret_store.zig`,
+//! общем с плагином `envee-plugin-env`: файл читают две программы, и
+//! договориться о месте и формате они должны буквально.
 //!
 //! Владение: всё из арены `Ctx`.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
-const Writer = Io.Writer;
 
 const args_mod = @import("args.zig");
 const context = @import("context.zig");
@@ -29,79 +27,24 @@ pub fn run(ctx: *Ctx, parsed: args_mod.Parsed) Error!void {
     unreachable;
 }
 
-const Secrets = std.StringArrayHashMapUnmanaged([]const u8);
-
-pub fn storePath(arena: Allocator, environ: *const std.process.Environ.Map) Allocator.Error![]const u8 {
-    const xdg = environ.get("XDG_DATA_HOME") orelse "";
-    const dir = if (xdg.len > 0)
-        xdg
-    else
-        try std.fs.path.join(arena, &.{ environ.get("HOME") orelse "", ".local", "share" });
-    return std.fs.path.join(arena, &.{ dir, "envee", "secrets", "env.json" });
-}
+const store = @import("../secret_store.zig");
+const Secrets = store.Secrets;
 
 fn load(ctx: *Ctx) Error!Secrets {
-    var out: Secrets = .empty;
-    const path = try storePath(ctx.arena, ctx.environ);
-    const data = Io.Dir.cwd().readFileAlloc(ctx.io, path, ctx.arena, .unlimited) catch |err| switch (err) {
-        error.FileNotFound => return out,
+    const path = try store.path(ctx.arena, ctx.environ);
+    return store.load(ctx.arena, ctx.io, path) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
-        else => return ioFail(path, "cannot read secret store", err),
+        error.Malformed => return parseFail(path),
+        error.ReadFailed => return ioFail(path, "cannot read secret store", err),
     };
-    const parsed = std.json.parseFromSliceLeaky(std.json.Value, ctx.arena, data, .{}) catch
-        return parseFail(path);
-    if (parsed != .object) return parseFail(path);
-    var it = parsed.object.iterator();
-    while (it.next()) |e| {
-        if (e.value_ptr.* != .string) return parseFail(path);
-        try out.put(ctx.arena, e.key_ptr.*, e.value_ptr.string);
-    }
-    return out;
 }
 
-/// Пишет хранилище целиком: временный файл рядом + rename, чтобы
-/// параллельный читатель не увидел полфайла. Ключи по алфавиту — как у
-/// `json.MarshalIndent` в Go, так что файл одинаков у обеих реализаций.
 fn save(ctx: *Ctx, secrets: Secrets) Error!void {
-    const arena = ctx.arena;
-    const path = try storePath(arena, ctx.environ);
-    const dir = std.fs.path.dirname(path) orelse ".";
-    const cwd = Io.Dir.cwd();
-    _ = cwd.createDirPathStatus(ctx.io, dir, .fromMode(0o700)) catch |err| return ioFail(dir, "cannot create secret store directory", err);
-
-    const keys = try arena.dupe([]const u8, secrets.keys());
-    std.mem.sort([]const u8, keys, {}, lessThan);
-
-    var body: Writer.Allocating = .init(arena);
-    const w = &body.writer;
-    if (keys.len == 0) {
-        w.writeAll("{}") catch return error.OutOfMemory;
-    } else {
-        w.writeAll("{\n") catch return error.OutOfMemory;
-        for (keys, 0..) |k, i| {
-            w.writeAll("  ") catch return error.OutOfMemory;
-            std.json.Stringify.value(k, .{}, w) catch return error.OutOfMemory;
-            w.writeAll(": ") catch return error.OutOfMemory;
-            std.json.Stringify.value(secrets.get(k).?, .{}, w) catch return error.OutOfMemory;
-            w.writeAll(if (i + 1 < keys.len) ",\n" else "\n") catch return error.OutOfMemory;
-        }
-        w.writeAll("}") catch return error.OutOfMemory;
-    }
-
-    var random_bytes: [8]u8 = undefined;
-    ctx.io.random(&random_bytes);
-    const tmp_path = try std.fmt.allocPrint(arena, "{s}/env-{x}.json.tmp", .{ dir, &random_bytes });
-    cwd.writeFile(ctx.io, .{
-        .sub_path = tmp_path,
-        .data = body.written(),
-        .flags = .{ .permissions = .fromMode(0o600) },
-    }) catch |err| return ioFail(tmp_path, "cannot write secret store", err);
-    errdefer cwd.deleteFile(ctx.io, tmp_path) catch {};
-    cwd.rename(tmp_path, cwd, path, ctx.io) catch |err| return ioFail(path, "cannot write secret store", err);
-}
-
-fn lessThan(_: void, a: []const u8, b: []const u8) bool {
-    return std.mem.lessThan(u8, a, b);
+    const path = try store.path(ctx.arena, ctx.environ);
+    store.save(ctx.arena, ctx.io, path, secrets) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.WriteFailed => return ioFail(path, "cannot write secret store", err),
+    };
 }
 
 fn runSet(ctx: *Ctx, arg: []const u8) Error!void {
@@ -141,9 +84,7 @@ fn runList(ctx: *Ctx) Error!void {
     }
     // Go перебирает карту в случайном порядке; здесь — по алфавиту, чтобы
     // вывод был стабилен. Значения не печатаются: это список, а не дамп.
-    const keys = try ctx.arena.dupe([]const u8, secrets.keys());
-    std.mem.sort([]const u8, keys, {}, lessThan);
-    for (keys) |k| try ctx.stdout.print("{s}=***REDACTED***\n", .{k});
+    for (try store.sortedKeys(ctx.arena, secrets)) |k| try ctx.stdout.print("{s}=***REDACTED***\n", .{k});
 }
 
 fn runGet(ctx: *Ctx, key: []const u8) Error!void {
@@ -259,18 +200,6 @@ test "a missing key and a malformed argument are explained" {
     errs.reset();
     try testing.expectError(error.ConfigValidation, harness.run(a, tmp, &.{ "secret", "set", "=value" }, &.{env}));
     try testing.expectEqual(errs.Code.e003, errs.take().?.code);
-}
-
-test "the store path follows XDG_DATA_HOME and falls back to ~/.local/share" {
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-
-    var environ: std.process.Environ.Map = .init(a);
-    try environ.put("HOME", "/home/u");
-    try testing.expectEqualStrings("/home/u/.local/share/envee/secrets/env.json", try storePath(a, &environ));
-    try environ.put("XDG_DATA_HOME", "/data");
-    try testing.expectEqualStrings("/data/envee/secrets/env.json", try storePath(a, &environ));
 }
 
 test "a corrupt store is an error rather than silently empty" {

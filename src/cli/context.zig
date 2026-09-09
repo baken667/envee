@@ -241,12 +241,15 @@ fn liftDirectiveError(err: anyerror, diag: directive.Diagnostics) Error {
             }, error.ConfigValidation);
         },
         error.SecretFailed => {
-            S.kv[0] = .{ .key = "variable", .value = diag.key };
-            S.kv[1] = .{ .key = "detail", .value = diag.detail };
+            // Как в Go: контекст — источник и ссылка, а слова плагина —
+            // в CAUSE. Имя переменной там не печатается.
+            S.kv[0] = .{ .key = "source", .value = diag.source };
+            S.kv[1] = .{ .key = "ref", .value = diag.ref };
             return errs.fail(.{
                 .code = .e004,
                 .summary = "secret plugin failed",
                 .context = S.kv[0..2],
+                .cause_text = diag.detail,
             }, error.PluginFailed);
         },
         error.RequiredFileMissing => {

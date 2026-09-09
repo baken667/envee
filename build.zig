@@ -38,6 +38,20 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
+    // Плагин локального хранилища секретов. Отдельный бинарь, как и в Go:
+    // ядро находит его в PATH по имени, и ничем не отличает от сторонних.
+    const env_plugin_root = b.createModule(.{
+        .root_source_file = b.path("src/envee_plugin_env.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    env_plugin_root.addOptions("build_options", options);
+    const env_plugin = b.addExecutable(.{
+        .name = "envee-plugin-env",
+        .root_module = env_plugin_root,
+    });
+    b.installArtifact(env_plugin);
+
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| run_cmd.addArgs(args);
@@ -56,6 +70,7 @@ pub fn build(b: *std.Build) void {
     });
     const test_options = b.addOptions();
     test_options.addOptionPath("fake_plugin", fake_plugin.getEmittedBin());
+    test_options.addOptionPath("env_plugin", env_plugin.getEmittedBin());
 
     const test_root = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),

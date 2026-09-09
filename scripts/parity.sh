@@ -225,6 +225,11 @@ for bin_and_store in "$GO_BIN:$GO_TRUST" "$ZIG_BIN:$ZIG_TRUST"; do
   done
 done
 PLUGIN_PATH="/usr/bin:/bin:$PLUGIN_DIR"
+# Тот же плагин, но на Zig (шаг 20): ядро любой реализации обязано
+# резолвить секреты через любой из двух.
+ZIG_PLUGIN_DIR="$(mktemp -d)"
+cp "$PWD/zig-out/bin/envee-plugin-env" "$ZIG_PLUGIN_DIR/"
+ZIG_PLUGIN_PATH="/usr/bin:/bin:$ZIG_PLUGIN_DIR"
 
 for ex in examples/*/; do
   ( cd "$ex" && XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" trust --yes >/dev/null 2>&1 ) || true
@@ -279,6 +284,39 @@ for ex in examples/*/; do
   esac
   CHECK_DIR="."
 done
+
+# ---- плагин env: крест-накрест ---------------------------------------------
+# Go-ядро с Zig-плагином и Zig-ядро с Zig-плагином дают то же, что Go-ядро с
+# Go-плагином. Хранилище секретов у плагина общее с ядром (XDG_DATA_HOME),
+# так что подмена плагина ничего больше не меняет.
+
+CHECK_DIR="examples/secrets"
+for sh in bash fish; do
+  check_no_path "Go core + Zig plugin: eval $sh" \
+    env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" eval "$sh" \
+    -- \
+    env -i HOME="$HOME" PATH="$ZIG_PLUGIN_PATH" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" eval "$sh"
+  check_no_path "Zig core + Zig plugin: eval $sh" \
+    env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" eval "$sh" \
+    -- \
+    env -i HOME="$HOME" PATH="$ZIG_PLUGIN_PATH" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" eval "$sh"
+done
+check "Go core + Zig plugin: resolve --json" \
+  env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" resolve --json \
+  -- \
+  env -i HOME="$HOME" PATH="$ZIG_PLUGIN_PATH" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" resolve --json
+# Ошибка плагина доходит до пользователя тем же текстом: секрет удалён,
+# обязательный секрет не резолвится, и оба ядра называют код not_found.
+for bin_and_store in "$GO_BIN:$GO_TRUST" "$ZIG_BIN:$ZIG_TRUST"; do
+  bin="${bin_and_store%%:*}"; store="${bin_and_store#*:}"
+  XDG_DATA_HOME="$store" "$bin" secret unset DATABASE_PASSWORD >/dev/null 2>&1
+done
+check "Zig core + Zig plugin: missing required secret" \
+  env -i HOME="$HOME" PATH="$ZIG_PLUGIN_PATH" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" eval bash \
+  -- \
+  env -i HOME="$HOME" PATH="$ZIG_PLUGIN_PATH" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" eval bash
+CHECK_DIR="."
+rm -rf "$ZIG_PLUGIN_DIR"
 
 # ---- подписи: крест-накрест ------------------------------------------------
 # Подпись, сделанная одной реализацией, обязана проверяться другой. Это

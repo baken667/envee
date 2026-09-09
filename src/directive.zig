@@ -119,8 +119,11 @@ pub const Error = error{
 pub const Diagnostics = struct {
     /// Переменная или ключ, на котором споткнулись.
     key: []const u8 = "",
-    /// Цепочка для цикла, источник для секрета и т.п.
+    /// Цепочка для цикла, сообщение плагина для секрета и т.п.
     detail: []const u8 = "",
+    /// Для секрета: откуда и что просили.
+    source: []const u8 = "",
+    ref: []const u8 = "",
     profile: []const u8 = "",
     file: file_mod.Diagnostics = .{},
 };
@@ -435,7 +438,7 @@ fn applySecrets(
             // пропускается: плагин может быть не настроен, и это не повод
             // ломать всю оболочку.
             if (!s.ref.required) continue;
-            if (diag) |d| d.* = .{ .key = s.name, .detail = r.detail(err) };
+            if (diag) |d| d.* = .{ .key = s.name, .detail = r.detail(err), .source = s.ref.source, .ref = s.ref.ref };
             return error.SecretFailed;
         };
         try res.env.setEntry(arena, .{

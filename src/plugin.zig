@@ -120,7 +120,7 @@ pub const Metadata = struct {
 /// Разбор метаданных. Промежуточная структура с необязательными списками:
 /// Go сериализует пустой срез как `null`, и `"exec":null` от настоящего
 /// плагина обязан разбираться, а не отвергаться.
-fn parseMetadata(arena: Allocator, bytes: []const u8) !Metadata {
+pub fn parseMetadata(arena: Allocator, bytes: []const u8) !Metadata {
     const Raw = struct {
         name: []const u8 = "",
         version: []const u8 = "",
@@ -786,9 +786,10 @@ test "eval resolves secrets through a discovered plugin" {
     try testing.expectError(error.PluginFailed, harness.run(a, d.tmp, &.{ "eval", "bash" }, &.{ path_pair, failing }));
     const diag = errs_mod.take().?;
     try testing.expectEqual(errs_mod.Code.e004, diag.code);
+    try testing.expectEqualStrings("E_NOT_FOUND: no such secret: nope", diag.cause_text);
     var found = false;
     for (diag.context) |kv| {
-        if (std.mem.eql(u8, kv.key, "detail") and std.mem.indexOf(u8, kv.value, "E_NOT_FOUND: no such secret: nope") != null) found = true;
+        if (std.mem.eql(u8, kv.key, "source") and std.mem.eql(u8, kv.value, "alpha")) found = true;
     }
     try testing.expect(found);
 
@@ -802,9 +803,39 @@ test "eval resolves secrets through a discovered plugin" {
     errs_mod.reset();
     try testing.expectError(error.PluginFailed, harness.run(a, d.tmp, &.{ "eval", "bash" }, &.{path_pair}));
     const missing = errs_mod.take().?;
-    var named = false;
-    for (missing.context) |kv| {
-        if (std.mem.indexOf(u8, kv.value, "plugin not found for source: vault") != null) named = true;
-    }
-    try testing.expect(named);
+    try testing.expectEqualStrings("plugin not found for source: vault", missing.cause_text);
+}
+
+// Совместимость с чужими плагинами: демонстрационный плагин из Go SDK
+// (`pkg/sdk-go/testdata/demoplugin`) собирается `go build` и резолвится
+// этим ядром. Без `go` в PATH тест пропускается, а не падает: он про
+// протокол, а не про наличие Go на машине.
+test "a plugin built on the Go SDK resolves through the Zig core" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const io = testing.io;
+    const tmp = try harness.TempDir.create(a);
+    defer tmp.destroy();
+
+    const bin = try tmp.join(a, "envee-plugin-demo");
+    const build = std.process.run(a, io, .{
+        .argv = &.{ "go", "build", "-o", bin, "./pkg/sdk-go/testdata/demoplugin" },
+    }) catch |err| switch (err) {
+        error.FileNotFound => return error.SkipZigTest,
+        else => return err,
+    };
+    if (build.term != .exited or build.term.exited != 0) return error.SkipZigTest;
+
+    var environ: Environ = .init(a);
+    try environ.put("PATH", tmp.path);
+    var disp = try discoverAndLoad(a, io, &environ);
+    const demo = disp.get("demo") orelse return error.TestUnexpectedResult;
+    try testing.expectEqualStrings("1.2.3", demo.metadata.?.version);
+    try testing.expectEqualStrings("value-for-db/password", try disp.resolveSecret(a, "demo", "db/password"));
+
+    // И его структурная ошибка доходит с кодом.
+    try environ.put("DEMO_MODE", "plugin_error");
+    try testing.expectError(error.PluginFailed, disp.resolveSecret(a, "demo", "missing"));
+    try testing.expect(std.mem.indexOf(u8, disp.last_detail, "E_NO_SUCH_SECRET: no secret named missing") != null);
 }

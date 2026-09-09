@@ -145,4 +145,6 @@ test {
     _ = @import("cli/trust.zig");
     _ = @import("plugin.zig");
     _ = @import("cli/secret.zig");
+    _ = @import("secret_store.zig");
+    _ = @import("plugins/env.zig");
 }
