@@ -23,6 +23,7 @@ const Allocator = std.mem.Allocator;
 
 const env = @import("env.zig");
 const escape = @import("shell/escape.zig");
+const gopath = @import("path.zig");
 
 /// Окружение вычисления шаблона.
 pub const Context = struct {
@@ -217,7 +218,7 @@ fn applyFilter(
         return gpa.dupe(u8, unquote(f.args[0]));
     }
     if (std.mem.eql(u8, f.name, "abspath")) {
-        return absPath(gpa, io, input);
+        return gopath.absPath(gpa, io, input);
     }
     if (std.mem.eql(u8, f.name, "realpath")) {
         var buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -225,10 +226,10 @@ fn applyFilter(
         return gpa.dupe(u8, buf[0..n]);
     }
     if (std.mem.eql(u8, f.name, "dirname")) {
-        return dirname(gpa, input);
+        return gopath.dirname(gpa, input);
     }
     if (std.mem.eql(u8, f.name, "basename")) {
-        return gpa.dupe(u8, basename(input));
+        return gpa.dupe(u8, gopath.basename(input));
     }
     if (std.mem.eql(u8, f.name, "quote")) {
         return escape.singleQuote(gpa, input);
@@ -247,109 +248,6 @@ fn unquote(s: []const u8) []const u8 {
         }
     }
     return s;
-}
-
-// ---- POSIX-семантика путей как в Go ----------------------------------------
-//
-// std.fs.path в Zig отвечает на те же вопросы иначе: dirname возвращает null
-// там, где Go возвращает "." или "/". Фильтры обязаны совпадать с Go, поэтому
-// здесь воспроизведены filepath.Clean, filepath.Dir и filepath.Base.
-
-fn isSep(c: u8) bool {
-    return c == '/';
-}
-
-/// Лексическая нормализация пути, эквивалент Go filepath.Clean.
-fn clean(gpa: Allocator, path: []const u8) Allocator.Error![]u8 {
-    if (path.len == 0) return gpa.dupe(u8, ".");
-
-    const rooted = isSep(path[0]);
-    const n = path.len;
-    var out = try gpa.alloc(u8, path.len + 1);
-    errdefer gpa.free(out);
-    var w: usize = 0;
-    var r: usize = 0;
-    var dotdot: usize = 0;
-
-    if (rooted) {
-        out[w] = '/';
-        w += 1;
-        r = 1;
-        dotdot = 1;
-    }
-
-    while (r < n) {
-        if (isSep(path[r])) {
-            r += 1;
-        } else if (path[r] == '.' and (r + 1 == n or isSep(path[r + 1]))) {
-            // Элемент "." ничего не значит.
-            r += 1;
-        } else if (path[r] == '.' and r + 1 < n and path[r + 1] == '.' and
-            (r + 2 == n or isSep(path[r + 2])))
-        {
-            r += 2;
-            if (w > dotdot) {
-                // Съедаем предыдущий элемент.
-                w -= 1;
-                while (w > dotdot and !isSep(out[w])) w -= 1;
-            } else if (!rooted) {
-                // ".." в начале относительного пути сократить не с чем.
-                if (w > 0) {
-                    out[w] = '/';
-                    w += 1;
-                }
-                out[w] = '.';
-                out[w + 1] = '.';
-                w += 2;
-                dotdot = w;
-            }
-        } else {
-            if ((rooted and w != 1) or (!rooted and w != 0)) {
-                out[w] = '/';
-                w += 1;
-            }
-            while (r < n and !isSep(path[r])) : (r += 1) {
-                out[w] = path[r];
-                w += 1;
-            }
-        }
-    }
-
-    if (w == 0) {
-        gpa.free(out);
-        return gpa.dupe(u8, ".");
-    }
-    return gpa.realloc(out, w);
-}
-
-/// Эквивалент Go filepath.Dir: всё, кроме последнего элемента, нормализовано.
-fn dirname(gpa: Allocator, path: []const u8) Allocator.Error![]u8 {
-    var i: isize = @as(isize, @intCast(path.len)) - 1;
-    while (i >= 0 and !isSep(path[@intCast(i)])) i -= 1;
-    const cut = path[0..@intCast(i + 1)];
-    return clean(gpa, cut);
-}
-
-/// Эквивалент Go filepath.Base: последний элемент пути.
-fn basename(path: []const u8) []const u8 {
-    if (path.len == 0) return ".";
-    var p = path;
-    while (p.len > 0 and isSep(p[p.len - 1])) p = p[0 .. p.len - 1];
-    var i: isize = @as(isize, @intCast(p.len)) - 1;
-    while (i >= 0 and !isSep(p[@intCast(i)])) i -= 1;
-    if (i >= 0) p = p[@intCast(i + 1)..];
-    if (p.len == 0) return "/";
-    return p;
-}
-
-/// Эквивалент Go filepath.Abs.
-fn absPath(gpa: Allocator, io: std.Io, path: []const u8) RenderError![]u8 {
-    if (path.len > 0 and isSep(path[0])) return clean(gpa, path);
-    const cwd = try std.process.currentPathAlloc(io, gpa);
-    defer gpa.free(cwd);
-    const joined = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ cwd, path });
-    defer gpa.free(joined);
-    return clean(gpa, joined);
 }
 
 /// Имена переменных, на которые ссылается шаблон.
@@ -495,7 +393,7 @@ test "clean matches Go filepath.Clean" {
         .{ .in = "a/../..", .want = ".." },
     };
     for (cases) |c| {
-        const got = try clean(testing.allocator, c.in);
+        const got = try gopath.clean(testing.allocator, c.in);
         defer testing.allocator.free(got);
         testing.expectEqualStrings(c.want, got) catch |err| {
             std.debug.print("clean({s})\n", .{c.in});

@@ -28,6 +28,7 @@ test {
     _ = @import("env.zig");
     _ = @import("dotenv.zig");
     _ = @import("template.zig");
+    _ = @import("path.zig");
     _ = @import("paths.zig");
     _ = @import("errs.zig");
     _ = @import("log.zig");
@@ -36,6 +37,8 @@ test {
     _ = @import("toml/parser.zig");
     _ = @import("config.zig");
     _ = @import("resolver.zig");
+    _ = @import("directive.zig");
+    _ = @import("directive/file.zig");
     _ = @import("shell/escape.zig");
     _ = @import("shell/shell.zig");
     _ = @import("shell/hook_test.zig");
