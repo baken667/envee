@@ -9,6 +9,62 @@ the curated view.
 
 ## [Unreleased]
 
+## [0.4.0] — Rewritten in Zig
+
+envee is now a Zig program. The Go implementation served as the behavioural
+reference throughout the rewrite — every command's output was diffed against
+it — and has been removed. [ADR-0019](docs/adr/0019-language-zig.md) explains
+the decision and what it cost.
+
+### Changed
+
+- **Every project must be trusted again once.** The content hash is computed
+  from a documented canonical form instead of a TOML library's re-encoding
+  ([ADR-0020](docs/adr/0020-canonical-hash-v2.md)). Trust entries written by
+  0.3.x are still read but count as unknown; `envee status` and `envee doctor`
+  list the affected projects. Denials are unaffected.
+- The binary is ~1 MB, statically linked on Linux (musl), and has no
+  dependencies. Releases ship `envee` and `envee-plugin-env` together; both
+  need to be on `$PATH`.
+- `envee version` reports the Zig version instead of the Go version.
+- `--help` lists flags and subcommands in declaration order and has no `help`
+  subcommand; `envee completion <shell>` is generated from the same command
+  tree.
+- `envee exec` accepts envee flags before `--` through the normal parser, so
+  `envee exec --profile prod -- cmd` behaves like every other command.
+
+### Removed
+
+- **YAML in `_.file`.** Neither the examples nor the tests used it; a YAML
+  file now fails with E003 and a hint to use dotenv, json or toml.
+- **`enveed`.** The daemon is not built. `envee daemon status` still reports
+  whether one is listening. Since 0.3.0 the shell hook does not run envee at
+  all when nothing changed, which was the daemon's reason to exist.
+- Man pages. `envee <command> --help` is the reference.
+- `go install github.com/baken667/envee/cmd/envee` — install from Homebrew or
+  the release archives.
+
+### Fixed
+
+Bugs in 0.3.x found by diffing the two implementations; each is documented in
+`docs/zig-rewrite-steps.md` under «Найдено в Go».
+
+- **Config precedence was inverted.** With `envee.local.toml` next to
+  `envee.toml`, or a child config under a monorepo root, the *lower*-priority
+  file won. The documented order now holds: the higher-priority file wins.
+- **`required` was checked before the profile's own variables were applied**,
+  so `required = ["DATABASE_URL"]` failed even when `[profiles.prod.env]` set
+  it — `examples/multi-profile` did not work with `--profile prod`.
+- **`resolve` and `diff` ignored `profile = "..."` from the config** and
+  showed a different environment than `eval` would apply.
+- **`eval` duplicated the current `$PATH`** in the `export PATH=` line.
+- **`envee check` missed template cycles written as `{{env.A}}`**, the form
+  the examples use.
+- **`-v` / `-vv` did nothing.**
+- `{{ value | json }}` and `{{ value | base64 }}`, promised by ADR-0011, now
+  exist.
+- Secret plugin failures (E004) show the plugin's own message as the cause.
+
 ## [0.3.0] — 2026-09-08
 
 ### Added

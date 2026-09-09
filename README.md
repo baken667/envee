@@ -3,11 +3,11 @@
 > **Per-directory environment variable manager** — fast, secure, declarative replacement for [direnv](https://direnv.net).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Go 1.24+](https://img.shields.io/badge/Go-1.24+-blue.svg)](go.mod)
+[![Zig 0.16](https://img.shields.io/badge/Zig-0.16-f7a41d.svg)](build.zig.zon)
 [![Homebrew](https://img.shields.io/badge/Homebrew-baken667%2Ftap-orange.svg)](https://github.com/baken667/homebrew-tap)
 
 ```bash
-# 1. Install (Homebrew, after first release)
+# 1. Install (Homebrew tap, or a prebuilt archive from the releases page)
 brew install baken667/tap/envee
 
 # 2. Add the shell hook
@@ -31,25 +31,34 @@ echo $DATABASE_URL     # env vars are loaded automatically
 | Secret plugins | none | none | **exec-based, 1Password/AWS/Vault/local** |
 | Script sandbox | none (RCE) | none | **WASM (wazero) — planned, not implemented** |
 | Shell hook overhead | ~5–15ms | ~5ms | **~0ms when nothing changed** (shell builtins only) |
-| Cross-platform (macOS/Linux) | ✅ | ✅ | **✅ single static binary (5 MB)** |
-| Homebrew distribution | ✅ homebrew-core | ✅ homebrew-core | **✅ custom tap, auto-publish via GoReleaser** |
+| Cross-platform (macOS/Linux) | ✅ | ✅ | **✅ single static binary (~1 MB)** |
+| Homebrew distribution | ✅ homebrew-core | ✅ homebrew-core | **✅ custom tap, prebuilt archives published on every tag** |
 
-See [docs/adr/](docs/adr/) for the full architecture decision log (18 ADRs).
+See [docs/adr/](docs/adr/) for the full architecture decision log (20 ADRs).
+
+envee is written in [Zig](https://ziglang.org) with no dependencies beyond the
+standard library. It started as a Go program; the rewrite and what changed
+with it are in [ADR-0019](docs/adr/0019-language-zig.md).
 
 ## Quick start
 
 ### Install
 
 ```bash
-# Homebrew (recommended, after first release)
+# Homebrew (recommended)
 brew install baken667/tap/envee
 
-# Go install (any platform)
-go install github.com/baken667/envee/cmd/envee@latest
+# Direct download: a prebuilt archive for linux/macOS (amd64, arm64) and
+# windows (amd64), with checksums signed via Sigstore, from
+# https://github.com/baken667/envee/releases
+tar -xzf envee_*_linux_amd64.tar.gz && sudo install envee envee-plugin-env /usr/local/bin/
 
-# Direct download: grab a prebuilt archive (with a Sigstore signature)
-# from https://github.com/baken667/envee/releases
+# From source (Zig 0.16)
+zig build -Doptimize=ReleaseSafe && sudo install zig-out/bin/envee zig-out/bin/envee-plugin-env /usr/local/bin/
 ```
+
+The archive contains two binaries: `envee` and `envee-plugin-env`, the local
+secret store plugin. Both must be on `$PATH`.
 
 ### Wire up your shell
 
@@ -97,7 +106,10 @@ DATABASE_PASSWORD=***REDACTED***
 GITHUB_TOKEN=***REDACTED***
 ```
 
-Stored in `~/.local/share/envee/secrets/env.json` (mode 0600).
+Stored in `$XDG_DATA_HOME/envee/secrets/env.json`, which defaults to
+`~/.local/share/envee/secrets/env.json` on every platform (mode 0600). This
+is the one file that does not follow the macOS convention below, because the
+plugin and `envee secret` must agree on it byte for byte.
 
 ### Trust the project
 
@@ -120,6 +132,10 @@ Trusted.
 ```
 
 Now every time you `cd` into this project, the env vars are automatically loaded into your shell.
+
+Approvals live in the trust store: `~/.local/share/envee/trust/` on Linux and
+`~/Library/Application Support/envee/trust/` on macOS (`$XDG_DATA_HOME`
+overrides both). `envee doctor` prints the exact paths on your machine.
 
 ## Commands
 
@@ -144,8 +160,8 @@ Now every time you `cd` into this project, the env vars are automatically loaded
 
 Planned, and currently hidden from `--help` because they are not implemented:
 `envee plugin install`, `envee daemon start/stop`, `envee upgrade`,
-`envee debug`, `envee telemetry enable/disable`, `envee doctor --fix` and
-`envee trust --sign`. They exit non-zero rather than pretending to succeed.
+`envee debug`, `envee telemetry enable/disable` and `envee doctor --fix`.
+They exit non-zero rather than pretending to succeed.
 
 Error codes and exit codes are documented in [docs/errors.md](docs/errors.md).
 
@@ -188,51 +204,56 @@ Shipped:
 | `envee-plugin-vault` | (Phase 3) HashiCorp Vault |
 | `envee-plugin-sops` | (Phase 3) Mozilla SOPS |
 
-Write your own plugin in 30 lines using [`pkg/sdk-go`](pkg/sdk-go/).
+Write your own plugin in 30 lines using [`pkg/sdk-go`](pkg/sdk-go/) — the Go
+SDK is a separate module (`github.com/baken667/envee/pkg/sdk-go`) and works
+unchanged with the Zig core. The wire protocol is in
+[ADR-0007](docs/adr/0007-plugin-protocol.md); a plugin can be written in any
+language that can read stdin and print JSON.
 
 ## Documentation
 
 - [docs/errors.md](docs/errors.md) — every error code, what causes it, how to fix it
 - [PLAN.md](PLAN.md) — high-level competitive analysis (Russian)
 - [ROADMAP.md](ROADMAP.md) — A/B/C implementation plan (Russian)
-- [docs/adr/](docs/adr/) — 18 Architecture Decision Records
+- [docs/adr/](docs/adr/) — 20 Architecture Decision Records
+- [docs/zig-rewrite.md](docs/zig-rewrite.md), [docs/zig-rewrite-steps.md](docs/zig-rewrite-steps.md) — how the Go → Zig rewrite was done, step by step, including the Go bugs it found (Russian)
 - [examples/](examples/) — example projects
 
 ## Project status
 
 **Pre-1.0.** The three planned milestones (eval, trust, plugins) are
-implemented. There is no published release yet.
+implemented. 0.4.0 is the first release of the Zig implementation; upgrading
+from 0.3.x requires one `envee trust` per project, because the content hash
+is computed differently (see [ADR-0020](docs/adr/0020-canonical-hash-v2.md)).
 
-Packages with tests:
+Modules with tests (`zig build test`, ~360 tests):
 
 ```
-  internal/cli         (check, eval golden tests)
-  internal/config      (TOML parser, profile flattening)
-  internal/directive   (Apply orchestrator: file, path, profile, secret, template)
-  internal/dotenv      (.env parser, hand-written state machine)
-  internal/env         (Map type, diff, merge)
-  internal/log         (redaction of sensitive attributes)
-  internal/paths       (XDG path invariants)
-  internal/plugin      (subprocess protocol: timeouts, bad exits, malformed
-                        output, dispatch)
-  internal/resolver    (discovery, merge, trust source tracking)
-  internal/shell       (bash/zsh/fish/nu/pwsh adapters; escaping is round-tripped
-                        through real bash, zsh and fish)
-  internal/template    (Jinja-lite, cycle detection)
-  internal/trust       (XDG_DATA_HOME store, summary)
-  pkg/sdk-go           (plugin wire protocol, driven end to end as a subprocess)
+  src/env.zig, dotenv.zig, template.zig, path.zig, paths.zig, errs.zig, log.zig
+  src/toml/          (own TOML 1.0 parser, canonical form, hash)
+  src/config.zig, resolver.zig, directive.zig, directive/file.zig
+  src/shell/         (bash/zsh/fish/nu/pwsh adapters; hooks and escaping are
+                      run through the real shells when they are installed)
+  src/trust/         (store, summary, OpenSSH ed25519 keys, signatures —
+                      cross-checked against entries signed by the Go version)
+  src/plugin.zig, plugins/env.zig, secret_store.zig
+  src/cli/           (every command, driven through the same code path as main)
+  pkg/sdk-go         (plugin wire protocol, driven end to end as a subprocess)
 ```
 
-Not yet covered: `internal/daemon` and `internal/errs`.
+Windows builds but is not tested; treat it as experimental.
 
 ## Development
 
+Requires Zig 0.16.0 exactly (`build.zig.zon` pins it).
+
 ```bash
-make build            # build ./bin/envee (and ./bin/enveed)
-make test             # run unit tests
-make test-race        # run with race detector
-make lint             # golangci-lint
-make goreleaser-snapshot  # build full release artifacts locally (no publish)
+zig build                 # ./zig-out/bin/envee and ./zig-out/bin/envee-plugin-env
+zig build test            # unit tests (add --summary all to see the count)
+zig fmt --check src build.zig
+zig build release         # cross-compile every release target into zig-out/release/
+make examples             # static-check every example config
+cd pkg/sdk-go && go test ./...   # the Go plugin SDK, if you touch it
 ```
 
 ## Contributing
