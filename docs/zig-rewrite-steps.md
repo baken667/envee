@@ -45,7 +45,7 @@
 - [x] Шаг 13 — `directive.zig` (порядок слоёв, coerce, шаблоны с топологическим порядком и поиском циклов, секреты, `prependToPath`), `directive/file.zig` (dotenv/json/toml), `path.zig` (совместимые с Go `clean`/`join`/`dirname`/`basename`/`absPath`, вынесены из template.zig). 203 теста. **Исправлен второй баг Go: `required` проверялся до применения переменных профиля — см. «Найдено в Go».** Дифференциал `apply` на 21 конфиге: 1 ожидаемое расхождение (исправленный баг), 20 совпадений. 2026-09-09
   - **Отступление:** YAML в `_.file` не поддерживается (в Go тянул `gopkg.in/yaml.v3`). Ни примеры, ни тесты им не пользуются; вместо молчаливого пропуска — внятная ошибка.
   - **Найдено по ходу:** `std.fs.path.join` не нормализует путь, поэтому `_.path = ["./bin"]` давал `<root>/./bin` вместо `<root>/bin` — мусор прямо в `$PATH`. Отсюда `path.zig` с семантикой Go `filepath.Join`.
-- [ ] Шаг 14 — `cli/args.zig`
+- [x] Шаг 14 — `cli/args.zig`: дерево команд, persistent-флаги, `--flag=value` и `--flag value`, кластеры коротких флагов, счётчики, `--` passthrough, проверка числа аргументов, подсказки по расстоянию Левенштейна, рендер справки и ошибок в форме cobra. 224 теста. **Найден третий баг Go: `-v` не работает — см. «Найдено в Go».** 2026-09-09
 - [ ] Шаг 15 — `cli/root.zig`, `init`, `version`, `eval` — **веха: бинарь пригоден для ежедневного использования**
 - [ ] Шаг 16 — `resolve`, `diff`, `check`
 - [ ] Шаг 17 — `trust/store.zig`, `summary.zig`, `prompt.zig`, trust gate, команды `trust`/`deny`
@@ -521,6 +521,19 @@ error.SkipZigTest — пропустить тест (нет бинаря shell'�
 | Формат `version` в trust-entry v2 | шаг 17 | `2`, v1 читается как Unknown |
 
 ## Найдено в Go (для переноса правильного поведения)
+
+### Флаг `-v` не работает (`internal/cli/root.go`)
+
+Объявлен булевым (`pf.BoolP("verbose", "v", false, ...)`), а читается как
+число (`verbose, _ := cmd.Flags().GetInt("verbose")`). `GetInt` на булевом
+флаге возвращает ошибку, её отбрасывают, значение остаётся нулём, и ветка
+`if verbose > 0` никогда не выполняется. `-v` и `-vv` не делают ничего.
+
+Проверено пробой на cobra: `GetInt(verbose) = 0, err = trying to get int
+value of flag of type bool`, при этом `GetBool(verbose) = true`.
+
+В Zig это настоящий счётчик (`FlagKind.counter`), покрыт тестом
+`verbose is a real counter`.
 
 ### ⚠️ `required` проверяется до применения переменных профиля (`internal/directive/directive.go`)
 
