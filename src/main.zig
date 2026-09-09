@@ -27,6 +27,7 @@ test "smoke" {
 test {
     _ = @import("env.zig");
     _ = @import("dotenv.zig");
+    _ = @import("template.zig");
     _ = @import("shell/escape.zig");
     _ = @import("shell/shell.zig");
     _ = @import("shell/hook_test.zig");
