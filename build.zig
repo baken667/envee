@@ -40,6 +40,7 @@ pub fn build(b: *std.Build) void {
     const host = addBinaries(b, target, optimize, options, null);
     b.installArtifact(host.envee);
     b.installArtifact(host.env_plugin);
+    b.installArtifact(host.infisical_plugin);
 
     const run_cmd = b.addRunArtifact(host.envee);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -60,6 +61,7 @@ pub fn build(b: *std.Build) void {
     const test_options = b.addOptions();
     test_options.addOptionPath("fake_plugin", fake_plugin.getEmittedBin());
     test_options.addOptionPath("env_plugin", host.env_plugin.getEmittedBin());
+    test_options.addOptionPath("infisical_plugin", host.infisical_plugin.getEmittedBin());
     test_options.addOptionPath("envee_bin", host.envee.getEmittedBin());
 
     const test_root = b.createModule(.{
@@ -84,7 +86,7 @@ pub fn build(b: *std.Build) void {
         const resolved = b.resolveTargetQuery(query);
         const bins = addBinaries(b, resolved, .ReleaseSafe, options, true);
         const dir: std.Build.InstallDir = .{ .custom = b.fmt("release/{s}", .{triple}) };
-        for ([_]*std.Build.Step.Compile{ bins.envee, bins.env_plugin }) |artifact| {
+        for ([_]*std.Build.Step.Compile{ bins.envee, bins.env_plugin, bins.infisical_plugin }) |artifact| {
             const install = b.addInstallArtifact(artifact, .{
                 .dest_dir = .{ .override = dir },
                 // Отладочная база Windows в релиз не идёт.
@@ -98,10 +100,11 @@ pub fn build(b: *std.Build) void {
 const Binaries = struct {
     envee: *std.Build.Step.Compile,
     env_plugin: *std.Build.Step.Compile,
+    infisical_plugin: *std.Build.Step.Compile,
 };
 
-/// Оба бинаря для одной цели. Плагин собирается вместе с ядром: он ходит в
-/// тот же файл секретов и должен быть той же версии.
+/// Все бинари для одной цели. Плагины собираются вместе с ядром и
+/// поставляются в том же архиве, одной версией.
 fn addBinaries(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
@@ -127,5 +130,14 @@ fn addBinaries(
     plugin_root.addOptions("build_options", options);
     const env_plugin = b.addExecutable(.{ .name = "envee-plugin-env", .root_module = plugin_root });
 
-    return .{ .envee = envee, .env_plugin = env_plugin };
+    const infisical_root = b.createModule(.{
+        .root_source_file = b.path("src/envee_plugin_infisical.zig"),
+        .target = target,
+        .optimize = optimize,
+        .strip = strip,
+    });
+    infisical_root.addOptions("build_options", options);
+    const infisical_plugin = b.addExecutable(.{ .name = "envee-plugin-infisical", .root_module = infisical_root });
+
+    return .{ .envee = envee, .env_plugin = env_plugin, .infisical_plugin = infisical_plugin };
 }

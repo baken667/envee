@@ -203,8 +203,8 @@ pub const ExecPlugin = struct {
     /// `<bin> resolve` для ссылки `ref`. Значение любого типа приводится к
     /// строке так же, как в Go: число — `%g`, логическое — `true/false`,
     /// объект — компактный JSON, отсутствие — пустая строка.
-    pub fn resolveSecret(p: *ExecPlugin, arena: Allocator, io: Io, environ: *const Environ, ref: []const u8) Error![]const u8 {
-        const body = try requestBody(arena, io, environ, ref);
+    pub fn resolveSecret(p: *ExecPlugin, arena: Allocator, io: Io, environ: *const Environ, ctx: RequestContext, ref: []const u8) Error![]const u8 {
+        const body = try requestBody(arena, io, environ, ctx, ref);
         const run = try runPlugin(arena, io, &.{ p.path, "resolve" }, environ, body, resolve_timeout_ms);
 
         const parsed: ?std.json.Value = std.json.parseFromSliceLeaky(std.json.Value, arena, run.stdout, .{}) catch null;
@@ -266,10 +266,20 @@ fn valueToString(arena: Allocator, v: std.json.Value) Allocator.Error![]const u8
     };
 }
 
+/// Блок `context` запроса: где лежит конфиг, откуда вызвали и какой профиль
+/// активен. Go брал это из переменных `ENVEE_*` окружения, которые в момент
+/// `eval` ещё не выставлены, и плагины получали пустые строки; здесь ядро
+/// передаёт то, что знает само, а переменные остаются запасным источником.
+pub const RequestContext = struct {
+    config_root: []const u8 = "",
+    cwd: []const u8 = "",
+    profile: []const u8 = "",
+};
+
 /// Тело запроса `resolve`. Порядок полей и содержимое — как у Go:
 /// `api_version, request_id, spec, context{config_root, cwd, profile, env}`,
 /// где `env` — всё окружение процесса с ключами по алфавиту.
-fn requestBody(arena: Allocator, io: Io, environ: *const Environ, ref: []const u8) Allocator.Error![]const u8 {
+fn requestBody(arena: Allocator, io: Io, environ: *const Environ, ctx: RequestContext, ref: []const u8) Allocator.Error![]const u8 {
     var out: Writer.Allocating = .init(arena);
     const w = &out.writer;
     const nanos = Io.Timestamp.now(io, .real).nanoseconds;
@@ -278,11 +288,11 @@ fn requestBody(arena: Allocator, io: Io, environ: *const Environ, ref: []const u
     w.print("{d},\"request_id\":\"req-{d}\",\"spec\":{{\"ref\":", .{ api_version, nanos }) catch return error.OutOfMemory;
     jsonString(w, ref) catch return error.OutOfMemory;
     write(w, "},\"context\":{\"config_root\":") catch return error.OutOfMemory;
-    jsonString(w, environ.get("ENVEE_CONFIG_ROOT") orelse "") catch return error.OutOfMemory;
+    jsonString(w, if (ctx.config_root.len > 0) ctx.config_root else environ.get("ENVEE_CONFIG_ROOT") orelse "") catch return error.OutOfMemory;
     write(w, ",\"cwd\":") catch return error.OutOfMemory;
-    jsonString(w, environ.get("ENVEE_CWD") orelse "") catch return error.OutOfMemory;
+    jsonString(w, if (ctx.cwd.len > 0) ctx.cwd else environ.get("ENVEE_CWD") orelse "") catch return error.OutOfMemory;
     write(w, ",\"profile\":") catch return error.OutOfMemory;
-    jsonString(w, environ.get("ENVEE_PROFILE") orelse "") catch return error.OutOfMemory;
+    jsonString(w, if (ctx.profile.len > 0) ctx.profile else environ.get("ENVEE_PROFILE") orelse "") catch return error.OutOfMemory;
     write(w, ",\"env\":{") catch return error.OutOfMemory;
 
     const keys = try arena.dupe([]const u8, environ.keys());
@@ -387,6 +397,8 @@ pub const Dispatcher = struct {
     arena: Allocator,
     io: Io,
     environ: *const Environ,
+    /// Что плагины узнают о вызове; заполняется тем, кто применяет конфиг.
+    context: RequestContext = .{},
     plugins: std.StringArrayHashMapUnmanaged(ExecPlugin) = .empty,
     last_detail: []const u8 = "",
 
@@ -403,7 +415,7 @@ pub const Dispatcher = struct {
             d.last_detail = try std.fmt.allocPrint(arena, "plugin not found for source: {s}", .{source});
             return error.PluginNotFound;
         };
-        return p.resolveSecret(arena, d.io, d.environ, ref) catch |err| {
+        return p.resolveSecret(arena, d.io, d.environ, d.context, ref) catch |err| {
             d.last_detail = p.last_detail;
             return err;
         };
@@ -446,10 +458,12 @@ pub fn discoverAndLoad(arena: Allocator, io: Io, environ: *const Environ) Alloca
 /// а `eval` вызывается из hook'а на каждое приглашение. Платить за это
 /// конфигам без секретов нельзя: иначе установка плагина замедляла бы
 /// каждый prompt, даже в проектах, которые плагином не пользуются.
-pub fn dispatcherFor(arena: Allocator, io: Io, environ: *const Environ, cfg: config.Config) Allocator.Error!?Dispatcher {
+pub fn dispatcherFor(arena: Allocator, io: Io, environ: *const Environ, cfg: config.Config, ctx: RequestContext) Allocator.Error!?Dispatcher {
     const refs = try cfg.secretRefs(arena);
     if (refs.len == 0) return null;
-    return try discoverAndLoad(arena, io, environ);
+    var d = try discoverAndLoad(arena, io, environ);
+    d.context = ctx;
+    return d;
 }
 
 // ---- тесты -------------------------------------------------------------------
@@ -559,7 +573,7 @@ test "resolve returns the plugin's value" {
     defer d.destroy();
 
     var p = try d.plugin(a, "fake");
-    try testing.expectEqualStrings("resolved:my/ref", try p.resolveSecret(a, testing.io, &d.environ, "my/ref"));
+    try testing.expectEqualStrings("resolved:my/ref", try p.resolveSecret(a, testing.io, &d.environ, .{}, "my/ref"));
 }
 
 test "non-string values are rendered the way Go renders them" {
@@ -577,7 +591,7 @@ test "non-string values are rendered the way Go renders them" {
         const d = try PluginDir.create(a, c[0]);
         defer d.destroy();
         var p = try d.plugin(a, "fake");
-        try testing.expectEqualStrings(c[1], try p.resolveSecret(a, testing.io, &d.environ, "r"));
+        try testing.expectEqualStrings(c[1], try p.resolveSecret(a, testing.io, &d.environ, .{}, "r"));
     }
 }
 
@@ -589,7 +603,7 @@ test "an error response keeps the plugin's own message" {
     defer d.destroy();
 
     var p = try d.plugin(a, "fake");
-    try testing.expectError(error.PluginFailed, p.resolveSecret(a, testing.io, &d.environ, "missing/ref"));
+    try testing.expectError(error.PluginFailed, p.resolveSecret(a, testing.io, &d.environ, .{}, "missing/ref"));
     // Без этого пользователю не сказали бы, почему секрет не достался.
     try testing.expect(std.mem.indexOf(u8, p.last_detail, "E_NOT_FOUND") != null);
     try testing.expect(std.mem.indexOf(u8, p.last_detail, "missing/ref") != null);
@@ -603,13 +617,13 @@ test "a non-ok status or garbage output is never a value" {
     const degraded = try PluginDir.create(a, "status_not_ok");
     defer degraded.destroy();
     var p = try degraded.plugin(a, "fake");
-    try testing.expectError(error.PluginFailed, p.resolveSecret(a, testing.io, &degraded.environ, "r"));
+    try testing.expectError(error.PluginFailed, p.resolveSecret(a, testing.io, &degraded.environ, .{}, "r"));
     try testing.expect(std.mem.indexOf(u8, p.last_detail, "degraded") != null);
 
     const garbage = try PluginDir.create(a, "garbage");
     defer garbage.destroy();
     var q = try garbage.plugin(a, "fake");
-    try testing.expectError(error.BadResponse, q.resolveSecret(a, testing.io, &garbage.environ, "r"));
+    try testing.expectError(error.BadResponse, q.resolveSecret(a, testing.io, &garbage.environ, .{}, "r"));
 }
 
 // Плагин, который никогда не отвечает, не должен подвешивать hook оболочки.
@@ -622,7 +636,7 @@ test "a hanging plugin is killed after the deadline" {
 
     const p = try d.plugin(a, "fake");
     const started = Io.Timestamp.now(testing.io, .awake).nanoseconds;
-    const body = try requestBody(a, testing.io, &d.environ, "r");
+    const body = try requestBody(a, testing.io, &d.environ, .{}, "r");
     const outcome = runPlugin(a, testing.io, &.{ p.path, "resolve" }, &d.environ, body, 300);
     const elapsed_ms = @divTrunc(Io.Timestamp.now(testing.io, .awake).nanoseconds - started, std.time.ns_per_ms);
 
@@ -639,11 +653,16 @@ test "the resolve request has the Go layout" {
     try environ.put("ZED", "last");
     try environ.put("ALPHA", "first");
     try environ.put("ENVEE_PROFILE", "dev");
-    const body = try requestBody(a, testing.io, &environ, "op://x/y");
+    const body = try requestBody(a, testing.io, &environ, .{}, "op://x/y");
 
     try testing.expect(std.mem.startsWith(u8, body, "{\"api_version\":1,\"request_id\":\"req-"));
     try testing.expect(std.mem.indexOf(u8, body, "\"spec\":{\"ref\":\"op://x/y\"}") != null);
     try testing.expect(std.mem.indexOf(u8, body, "\"context\":{\"config_root\":\"\",\"cwd\":\"\",\"profile\":\"dev\",\"env\":{\"ALPHA\":\"first\",\"ENVEE_PROFILE\":\"dev\",\"ZED\":\"last\"}}}") != null);
+
+    // Контекст от ядра важнее переменных окружения: он знает активный
+    // профиль и каталог конфига, а переменные в момент eval ещё не выставлены.
+    const with_ctx = try requestBody(a, testing.io, &environ, .{ .config_root = "/proj", .cwd = "/proj/sub", .profile = "prod" }, "r");
+    try testing.expect(std.mem.indexOf(u8, with_ctx, "\"context\":{\"config_root\":\"/proj\",\"cwd\":\"/proj/sub\",\"profile\":\"prod\",") != null);
 
     // Это и валидный JSON.
     const v = try std.json.parseFromSliceLeaky(std.json.Value, a, body, .{});
@@ -770,10 +789,10 @@ test "a config without secrets gets no dispatcher at all" {
     try environ.put("PATH", "/nonexistent");
 
     const cfg = try config.parseBytes(a, "envee.toml", "schema = \"envee/v1\"\n[env]\nA = \"1\"\n", null);
-    try testing.expect((try dispatcherFor(a, testing.io, &environ, cfg)) == null);
+    try testing.expect((try dispatcherFor(a, testing.io, &environ, cfg, .{})) == null);
 
     const with_secret = try config.parseBytes(a, "envee.toml", "schema = \"envee/v1\"\n[env]\nA = { source = \"fake\", ref = \"r\" }\n", null);
-    try testing.expect((try dispatcherFor(a, testing.io, &environ, with_secret)) != null);
+    try testing.expect((try dispatcherFor(a, testing.io, &environ, with_secret, .{})) != null);
 }
 
 // Сквозная проверка: конфиг с секретом → eval → плагин вызван, значение в
