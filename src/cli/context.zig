@@ -83,6 +83,8 @@ pub const Ctx = struct {
     stderr: *Writer,
     /// Абсолютный путь к самому бинарю — попадает в сгенерированный hook.
     self_path: []const u8,
+    /// Версия, попадающая в записи хранилища доверия.
+    tool_version: []const u8 = "",
     trust: TrustGate,
 };
 
@@ -171,14 +173,112 @@ pub fn resolveEnv(ctx: *Ctx, profile_flag: []const u8, stop_at: []const u8) Erro
     const loaded = try loadConfig(ctx, activeProfile(ctx, profile_flag), stop_at);
     try ctx.trust.check(loaded.cfg.sources);
 
-    const result = try directive.apply(ctx.arena, ctx.io, loaded.cfg, .{
+    var diag: directive.Diagnostics = .{};
+    const result = directive.apply(ctx.arena, ctx.io, loaded.cfg, .{
         .config_root = loaded.config_root,
         .profile = loaded.profile,
         .cwd = ctx.cwd,
         .os_env = &ctx.os_env,
-    }, null, null);
+    }, null, &diag) catch |err| return liftDirectiveError(err, diag);
 
     return .{ .loaded = loaded, .result = result };
+}
+
+/// Превращает ошибку применения директив в диагностику с кодом.
+///
+/// Без этого пользователь видел бы голое имя ошибки вместо объяснения,
+/// подсказки и ссылки на документацию — то есть ровно ничего полезного.
+fn liftDirectiveError(err: anyerror, diag: directive.Diagnostics) Error {
+    const S = struct {
+        var kv: [2]errs.KV = undefined;
+    };
+    switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.RequiredVarMissing => {
+            var n: usize = 1;
+            S.kv[0] = .{ .key = "variable", .value = diag.key };
+            if (diag.profile.len > 0) {
+                S.kv[1] = .{ .key = "profile", .value = diag.profile };
+                n = 2;
+            }
+            return errs.fail(.{
+                .code = .e008,
+                .summary = "required variable not defined",
+                .context = S.kv[0..n],
+                .hint = "Set it in envee.toml, .env file, or via a secret plugin.",
+            }, error.RequiredVarMissing);
+        },
+        error.CycleDetected => {
+            S.kv[0] = .{ .key = "chain", .value = diag.detail };
+            return errs.fail(.{
+                .code = .e007,
+                .summary = "circular dependency in template",
+                .context = S.kv[0..1],
+                .hint = "Break the cycle by using a constant value.",
+            }, error.CycleDetected);
+        },
+        error.ReservedKey => {
+            S.kv[0] = .{ .key = "key", .value = diag.key };
+            return errs.fail(.{
+                .code = .e003,
+                .summary = "config may not set reserved variable",
+                .context = S.kv[0..1],
+                .hint = "Variables starting with ENVEE_ configure envee itself and cannot be set from a config file.",
+            }, error.ConfigValidation);
+        },
+        error.SecretMissingRef => {
+            S.kv[0] = .{ .key = "key", .value = diag.key };
+            return errs.fail(.{
+                .code = .e003,
+                .summary = "secret shorthand missing 'ref'",
+                .context = S.kv[0..1],
+            }, error.ConfigValidation);
+        },
+        error.SecretFailed => {
+            S.kv[0] = .{ .key = "variable", .value = diag.key };
+            S.kv[1] = .{ .key = "detail", .value = diag.detail };
+            return errs.fail(.{
+                .code = .e004,
+                .summary = "secret plugin failed",
+                .context = S.kv[0..2],
+            }, error.PluginFailed);
+        },
+        error.RequiredFileMissing => {
+            S.kv[0] = .{ .key = "path", .value = diag.file.path };
+            return errs.fail(.{
+                .code = .e012,
+                .summary = "file not found",
+                .context = S.kv[0..1],
+                .hint = "Create the file or set `required = false` in the _.file directive.",
+            }, error.FileNotFound);
+        },
+        error.UnsupportedFormat, error.MissingPath => {
+            S.kv[0] = .{ .key = "path", .value = diag.file.path };
+            S.kv[1] = .{ .key = "detail", .value = diag.file.detail };
+            return errs.fail(.{
+                .code = .e003,
+                .summary = "unsupported _.file entry",
+                .context = S.kv[0..2],
+            }, error.ConfigValidation);
+        },
+        error.ParseFailed => {
+            S.kv[0] = .{ .key = "path", .value = diag.file.path };
+            S.kv[1] = .{ .key = "format", .value = diag.file.format };
+            return errs.fail(.{
+                .code = .e002,
+                .summary = "parse failed",
+                .context = S.kv[0..2],
+            }, error.ConfigParse);
+        },
+        else => {
+            S.kv[0] = .{ .key = "detail", .value = @errorName(err) };
+            return errs.fail(.{
+                .code = .e005,
+                .summary = "failed to resolve the environment",
+                .context = S.kv[0..1],
+            }, error.TemplateFailed);
+        },
+    }
 }
 
 pub fn unsupportedShell(name: []const u8) Error {

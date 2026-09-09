@@ -11,6 +11,8 @@ const Io = std.Io;
 const args_mod = @import("cli/args.zig");
 const cli = @import("cli/root.zig");
 const cli_context = @import("cli/context.zig");
+const trust_cmd = @import("cli/trust.zig");
+const trust_store = @import("trust/store.zig");
 const env_mod = @import("env.zig");
 const errs = @import("errs.zig");
 const paths_mod = @import("paths.zig");
@@ -79,6 +81,17 @@ fn dispatch(
 
     cli.configureLogging(parsed, err_out);
 
+    var gate: trust_cmd.Gate = .{
+        .arena = arena,
+        .store = .{
+            .root = (try paths_mod.Paths.init(arena, init.environ_map)).trust_store,
+            .io = io,
+            .now_ns = Io.Timestamp.now(io, .real).nanoseconds,
+            .user = init.environ_map.get("USER") orelse (init.environ_map.get("USERNAME") orelse "unknown"),
+            .tool_version = cli.build_options.version,
+        },
+    };
+
     var ctx: cli_context.Ctx = .{
         .arena = arena,
         .io = io,
@@ -89,12 +102,14 @@ fn dispatch(
         .stderr = err_out,
         .cwd = try std.process.currentPathAlloc(io, arena),
         .self_path = try std.process.executablePathAlloc(io, arena),
-        // Настоящее хранилище доверия появится на шаге 17; пока ни один
-        // конфиг не одобрен, и eval честно об этом сообщает.
-        .trust = cli_context.TrustGate.denyAll(),
+        .tool_version = cli.build_options.version,
+        .trust = gate.trustGate(),
     };
 
-    try cli.run(&ctx, parsed);
+    // Вопрос задаётся только когда есть кому отвечать; иначе `envee trust`
+    // честно откажется, а не одобрит молча.
+    var stdin_asker: trust_cmd.StdinAsker = .{ .io = io, .out = err_out };
+    try cli.runWith(&ctx, parsed, "", stdin_asker.asker());
     return 0;
 }
 
@@ -123,4 +138,7 @@ test {
     _ = @import("cli/root.zig");
     _ = @import("cli/resolve.zig");
     _ = @import("cli/check.zig");
+    _ = @import("trust/store.zig");
+    _ = @import("trust/summary.zig");
+    _ = @import("cli/trust.zig");
 }
