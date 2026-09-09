@@ -49,3 +49,7 @@ glide.iml
 # Goreleaser
 .goreleaser.yml.local
 Untitled
+
+# Zig
+/zig-out/
+/.zig-cache/
