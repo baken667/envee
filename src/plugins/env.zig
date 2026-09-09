@@ -1,9 +1,9 @@
 //! `envee-plugin-env`: плагин секретов над локальным хранилищем.
 //!
-//! Порт `plugins/env/main.go` вместе с той частью `pkg/sdk-go/protocol.go`,
-//! что отвечает за разбор запроса и форму ответа. Логика вынесена из
-//! `main` в чистую функцию `run`, чтобы её можно было тестировать без
-//! процесса: на входе argv, stdin и окружение, на выходе stdout и код.
+//! Порт `plugins/env/main.go`. Разбор запроса и форма ответов — в общем
+//! `protocol.zig`. Логика вынесена из `main` в чистую функцию `run`, чтобы
+//! её можно было тестировать без процесса: на входе argv, stdin и
+//! окружение, на выходе stdout и код.
 //!
 //! Владение: всё из арены вызывающего.
 
@@ -16,20 +16,12 @@ const Environ = std.process.Environ.Map;
 
 const build_options = @import("build_options");
 const store = @import("../secret_store.zig");
-const time_fmt = @import("../trust/store.zig");
+const protocol = @import("protocol.zig");
 
 pub const name = "env";
-pub const api_version: i64 = 1;
-/// TTL по умолчанию — 15 минут, как в Go.
-pub const ttl_seconds: i64 = 900;
-
-pub const Input = struct {
-    argv: []const []const u8,
-    stdin: []const u8,
-    environ: *const Environ,
-    /// Момент ответа, для `resolved_at`.
-    now_ns: i128,
-};
+pub const api_version = protocol.api_version;
+pub const ttl_seconds = protocol.default_ttl_seconds;
+pub const Input = protocol.Input;
 
 /// Выполняет подкоманду и возвращает код выхода. Всё, что плагин говорит
 /// ядру, идёт в `out` (stdout); человеку — в `err_out`.
@@ -61,25 +53,9 @@ fn writeMetadata(out: *Writer) Writer.Error!void {
 }
 
 fn resolve(arena: Allocator, io: Io, in: Input, out: *Writer) Allocator.Error!u8 {
-    const parsed = std.json.parseFromSliceLeaky(std.json.Value, arena, in.stdin, .{}) catch {
-        try writeError(arena, out, "", "invalid_request", "parse: request is not valid JSON", false);
-        return 1;
-    };
-    const obj: ?std.json.ObjectMap = if (parsed == .object) parsed.object else null;
-    const request_id = if (obj) |o| stringField(o, "request_id") orelse "" else "";
-
-    const got_version: i64 = if (obj) |o| (if (o.get("api_version")) |v| (if (v == .integer) v.integer else 0) else 0) else 0;
-    if (got_version != api_version) {
-        try writeError(arena, out, request_id, "version_mismatch", try std.fmt.allocPrint(arena, "plugin API version {d}, expected {d}", .{ got_version, api_version }), false);
-        return 1;
-    }
-
-    var ref: []const u8 = "";
-    if (obj.?.get("spec")) |spec| if (spec == .object) {
-        ref = stringField(spec.object, "ref") orelse "";
-    };
-    if (ref.len == 0) {
-        try writeError(arena, out, request_id, "invalid_spec", "ref is required", false);
+    const req = (try protocol.readRequest(arena, out, in.stdin)) orelse return 1;
+    if (req.ref.len == 0) {
+        try protocol.writeError(arena, out, req.request_id, "invalid_spec", "ref is required", false);
         return 1;
     }
 
@@ -87,51 +63,20 @@ fn resolve(arena: Allocator, io: Io, in: Input, out: *Writer) Allocator.Error!u8
     const secrets = store.load(arena, io, path) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.Malformed => {
-            try writeError(arena, out, request_id, "internal", try std.fmt.allocPrint(arena, "parse {s}: not a JSON object of strings", .{path}), true);
+            try protocol.writeError(arena, out, req.request_id, "internal", try std.fmt.allocPrint(arena, "parse {s}: not a JSON object of strings", .{path}), true);
             return 1;
         },
         error.ReadFailed => {
-            try writeError(arena, out, request_id, "internal", try std.fmt.allocPrint(arena, "read {s}: failed", .{path}), true);
+            try protocol.writeError(arena, out, req.request_id, "internal", try std.fmt.allocPrint(arena, "read {s}: failed", .{path}), true);
             return 1;
         },
     };
-    const value = secrets.get(ref) orelse {
-        try writeError(arena, out, request_id, "not_found", try std.fmt.allocPrint(arena, "secret \"{s}\" not found in env store", .{ref}), true);
+    const value = secrets.get(req.ref) orelse {
+        try protocol.writeError(arena, out, req.request_id, "not_found", try std.fmt.allocPrint(arena, "secret \"{s}\" not found in env store", .{req.ref}), true);
         return 1;
     };
-
-    var body: Writer.Allocating = .init(arena);
-    const w = &body.writer;
-    w.writeAll("{\"api_version\":1,\"request_id\":") catch return error.OutOfMemory;
-    std.json.Stringify.value(request_id, .{}, w) catch return error.OutOfMemory;
-    w.writeAll(",\"status\":\"ok\",\"value\":{\"type\":\"string\",\"value\":") catch return error.OutOfMemory;
-    std.json.Stringify.value(value, .{}, w) catch return error.OutOfMemory;
-    w.print("}},\"metadata\":{{\"resolved_at\":\"{s}\",\"ttl_seconds\":{d},\"source\":\"\"}}}}\n", .{
-        try time_fmt.formatRfc3339(arena, in.now_ns),
-        ttl_seconds,
-    }) catch return error.OutOfMemory;
-    out.writeAll(body.written()) catch {};
+    try protocol.writeOk(arena, out, req.request_id, value, in.now_ns, "");
     return 0;
-}
-
-/// Ошибка уходит в stdout структурой, а не в stderr текстом: ядро читает
-/// её оттуда и показывает пользователю код и сообщение плагина.
-fn writeError(arena: Allocator, out: *Writer, request_id: []const u8, code: []const u8, message: []const u8, recoverable: bool) Allocator.Error!void {
-    var body: Writer.Allocating = .init(arena);
-    const w = &body.writer;
-    w.writeAll("{\"api_version\":1,\"request_id\":") catch return error.OutOfMemory;
-    std.json.Stringify.value(request_id, .{}, w) catch return error.OutOfMemory;
-    w.writeAll(",\"status\":\"error\",\"error\":{\"code\":") catch return error.OutOfMemory;
-    std.json.Stringify.value(code, .{}, w) catch return error.OutOfMemory;
-    w.writeAll(",\"message\":") catch return error.OutOfMemory;
-    std.json.Stringify.value(message, .{}, w) catch return error.OutOfMemory;
-    w.print(",\"recoverable\":{}}}}}\n", .{recoverable}) catch return error.OutOfMemory;
-    out.writeAll(body.written()) catch {};
-}
-
-fn stringField(o: std.json.ObjectMap, key: []const u8) ?[]const u8 {
-    const v = o.get(key) orelse return null;
-    return if (v == .string) v.string else null;
 }
 
 // ---- тесты -------------------------------------------------------------------
@@ -172,7 +117,7 @@ fn response(a: Allocator, stdout: []const u8) !std.json.ObjectMap {
 }
 
 fn errorCode(o: std.json.ObjectMap) []const u8 {
-    return stringField(o.get("error").?.object, "code").?;
+    return protocol.stringField(o.get("error").?.object, "code").?;
 }
 
 const Fixture = struct {
@@ -223,14 +168,14 @@ test "resolve returns the stored value with request id and default TTL" {
     const r = try runWith(a, &f.environ, &.{ "envee-plugin-env", "resolve" }, try request(a, 1, "db/password"));
     try testing.expectEqual(@as(u8, 0), r.code);
     const o = try response(a, r.stdout);
-    try testing.expectEqualStrings("ok", stringField(o, "status").?);
-    try testing.expectEqualStrings("req-1", stringField(o, "request_id").?);
+    try testing.expectEqualStrings("ok", protocol.stringField(o, "status").?);
+    try testing.expectEqualStrings("req-1", protocol.stringField(o, "request_id").?);
     try testing.expectEqual(@as(i64, 1), o.get("api_version").?.integer);
-    try testing.expectEqualStrings("hunter2", stringField(o.get("value").?.object, "value").?);
-    try testing.expectEqualStrings("string", stringField(o.get("value").?.object, "type").?);
+    try testing.expectEqualStrings("hunter2", protocol.stringField(o.get("value").?.object, "value").?);
+    try testing.expectEqualStrings("string", protocol.stringField(o.get("value").?.object, "type").?);
     const md = o.get("metadata").?.object;
     try testing.expectEqual(ttl_seconds, md.get("ttl_seconds").?.integer);
-    try testing.expectEqualStrings("2023-11-14T22:13:20Z", stringField(md, "resolved_at").?);
+    try testing.expectEqualStrings("2023-11-14T22:13:20Z", protocol.stringField(md, "resolved_at").?);
 }
 
 test "structured errors: version mismatch, malformed request, missing ref, unknown key" {
@@ -252,7 +197,7 @@ test "structured errors: version mismatch, malformed request, missing ref, unkno
     try testing.expectEqual(@as(u8, 1), no_ref.code);
     const no_ref_o = try response(a, no_ref.stdout);
     try testing.expectEqualStrings("invalid_spec", errorCode(no_ref_o));
-    try testing.expectEqualStrings("r", stringField(no_ref_o, "request_id").?);
+    try testing.expectEqualStrings("r", protocol.stringField(no_ref_o, "request_id").?);
 
     // Пустое хранилище: ключа нет — not_found, и ошибка помечена как
     // восстановимая (пользователь может выполнить `envee secret set`).
@@ -261,7 +206,7 @@ test "structured errors: version mismatch, malformed request, missing ref, unkno
     const mo = try response(a, missing.stdout);
     try testing.expectEqualStrings("not_found", errorCode(mo));
     try testing.expect(mo.get("error").?.object.get("recoverable").?.bool);
-    try testing.expect(std.mem.indexOf(u8, stringField(mo.get("error").?.object, "message").?, "\"nope\"") != null);
+    try testing.expect(std.mem.indexOf(u8, protocol.stringField(mo.get("error").?.object, "message").?, "\"nope\"") != null);
 }
 
 test "a corrupt store is an internal error, not an empty one" {

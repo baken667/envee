@@ -84,7 +84,7 @@ jobs:
       - name: Pack archives
         # Same names goreleaser produced for 0.3.x, so existing download
         # scripts keep working: envee_<version>_<os>_<arch>.tar.gz (zip on
-        # windows), each holding both binaries plus LICENSE and README.
+        # windows), each holding envee and every envee-plugin-* plus LICENSE and README.
         run: |
           version="${{ steps.meta.outputs.version }}"
           mkdir -p dist
@@ -95,10 +95,10 @@ jobs:
             mkdir -p "$stage"
             cp LICENSE README.md CHANGELOG.md "$stage/"
             if [ "$os" = "windows" ]; then
-              cp "zig-out/release/$triple/envee.exe" "zig-out/release/$triple/envee-plugin-env.exe" "$stage/"
+              cp zig-out/release/$triple/envee.exe zig-out/release/$triple/envee-plugin-*.exe "$stage/"
               (cd dist && zip -qr "$name.zip" "$name")
             else
-              cp "zig-out/release/$triple/envee" "zig-out/release/$triple/envee-plugin-env" "$stage/"
+              cp zig-out/release/$triple/envee zig-out/release/$triple/envee-plugin-* "$stage/"
               tar -C dist -czf "dist/$name.tar.gz" "$name"
             fi
             rm -rf "$stage"
@@ -134,6 +134,7 @@ jobs:
           "$bin/envee" init bash | grep -q _envee_hook
           "$bin/envee" check examples/basic/envee.toml
           "$bin/envee-plugin-env" metadata | grep -q '"name":"env"'
+          "$bin/envee-plugin-infisical" metadata | grep -q '"name":"infisical"'
 
       - name: Publish the GitHub release
         env:

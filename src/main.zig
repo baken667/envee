@@ -147,6 +147,8 @@ test {
     _ = @import("cli/secret.zig");
     _ = @import("secret_store.zig");
     _ = @import("plugins/env.zig");
+    _ = @import("plugins/protocol.zig");
+    _ = @import("plugins/infisical.zig");
     _ = @import("cli/status.zig");
     _ = @import("cli/plugin_cmd.zig");
     _ = @import("cli/exec.zig");

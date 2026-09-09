@@ -9,6 +9,17 @@ the curated view.
 
 ## [Unreleased]
 
+### Added
+
+- **`envee-plugin-infisical`**, bundled with envee. Resolves secrets from
+  [Infisical](https://infisical.com) through the official `infisical` CLI,
+  so its login, machine identities, self-hosted domains and `.infisical.json`
+  apply unchanged. `ref = "[env:][/folder/]NAME"`; the Infisical environment
+  falls back to `$INFISICAL_ENV` and then to the active envee profile.
+- Plugins now receive the real `context` block: the config directory, the
+  working directory and the active profile. Before, those came from `ENVEE_*`
+  variables that are not set yet while `eval` runs, so they were empty.
+
 ## [0.4.2] — Rewritten in Zig
 
 Version note: the `v0.4.0` and `v0.4.1` tags were published by mistake from
