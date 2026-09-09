@@ -24,15 +24,17 @@
 Обновлять при закрытии шага.
 
 - [x] Шаг 0 — skeleton (`build.zig`, `build.zig.zon`, `src/main.zig`), коммит `9eb50ef`. 2026-09-09
-- [ ] Шаг 1 — `env.zig`: **начат**, есть незакоммиченный черновик `src/env.zig` (103 строки: `Entry`, `Map` с `deinit/find/setEntry/unset`, `DiffOp`, `diff`). Нет: `len/get/getEntry/set/keys/clone/merge/asExport/fromEnviron`, тестов, подключения в `main.zig`.
-- [ ] Шаг 2 — `shell/escape.zig`
-- [ ] Шаг 3 — `shell/` адаптеры и hook-шаблоны
-- [ ] Шаг 4 — `scripts/parity.sh`
-- [ ] Шаг 5 — `dotenv.zig`
-- [ ] Шаг 6 — `template.zig`
-- [ ] Шаг 7 — `paths.zig`
-- [ ] Шаг 8 — `errs.zig`, `log.zig`
-- [ ] Шаг 9 — `toml/lexer.zig`
+- [x] Шаг 1 — `env.zig`: `Entry`, `Map` (len/get/getEntry/set/setEntry/unset/keys/clone/merge/asExport/fromEnviron), `diff`; 12 тестов. Коммит `d6738eb`. 2026-09-09
+- [x] Шаг 2 — `shell/escape.zig`: bash/singleQuote/ansiC/doubleQuote/fish/nu/pwsh, writer-API + alloc-обёртки; 13 тестов, из них round-trip на живых bash/zsh/fish. Вывод сверен с Go побайтно (31 значение × 6 функций, 0 расхождений). Коммит `e903577`. 2026-09-09
+- [x] Шаг 3 — `shell/shell.zig` (Adapter как enum с методами: detect/writeInit/writeEscaped/writeExport/writeUnset/writeSetPath/writeDiff/writeFastPath), `shell/hooks/*.zig` (5 шаблонов, сгенерированы из Go-дампа), `shell/hook_test.zig` (6 живых тестов fast path на bash/zsh/fish). 42 теста. Вывод сверен с Go побайтно: 5 шаблонов init + 1105 байт adapter-операций, 0 расхождений. Коммит `14e9c7d`. 2026-09-09
+- [x] Шаг 4 — `scripts/parity.sh` + временный exe `envee-dev` (`src/dev_main.zig`, удалить на шаге 15). Сверяет `init` для 5 оболочек, 5/5 ok; проверено, что на подложенном расхождении падает с кодом 1. Коммит `0fb4f35`. 2026-09-09
+- [x] Шаг 5 — `dotenv.zig`: конечный автомат, `Vars` (владеет ключами и значениями), `parse`/`parseWithExpansion`/`parseFile`, `Diagnostics` с номером строки. 62 теста. Сверено с Go на 44 входах (включая CRLF, `export` не в первой строке, 3 ошибочных) — 0 расхождений. Коммит `94318bc`. 2026-09-09
+- [x] Шаг 6 — `template.zig`: `render`, `extractVarRefs`, 9 фильтров, POSIX-семантика путей как в Go (`clean`/`dirname`/`basename`/`absPath`). 71 тест. Сверено с Go на 49 шаблонах (9 из них ошибочные) — 0 расхождений. Коммит `b2d060e`. 2026-09-09
+- [x] Шаг 7 — `paths.zig`: `Paths.init`/`deinit`/`ensureDirs`, дефолты macOS/Linux/Windows как в `adrg/xdg@v0.5.3`, отбрасывание относительных XDG_*, раскрытие `~` и `$HOME`, runtime-каталог с правами 0700. 79 тестов. Сверено с Go на 6 конфигурациях окружения (48 путей) — 0 расхождений. Коммит `c64fc92`. 2026-09-09
+- [x] Шаг 8 — `errs.zig` (Code E001–E015 с exitCode и doc-URL, `Diag` с рендерингом как в Go, `fail`/`take`, 6 конструкторов) и `log.zig` (уровни, text/json, quiet, редакция секретов независимо от типа значения и внутри групп). 98 тестов. Рендеринг ошибок сверен с Go: 9 ошибок + 15 doc-URL, 0 расхождений. Коммит `2ddd69f`. 2026-09-09
+- [x] Шаг 9 — `toml/lexer.zig`: токены с позицией (строка+столбец), строки всех четырёх видов, числа во всех системах счисления, отказ от дат с указанием места. 113 тестов, включая лексирование всех 5 реальных `examples/**/*.toml` с диска. Коммит `9772cd2`. 2026-09-09
+  - **Решение:** `true`/`false`/`inf`/`nan` лексер отдаёт как `bare_key` — по спецификации TOML это ещё и допустимые имена ключей. Различать значение и ключ будет парсер (шаг 10), у него есть контекст.
+  - **Ограничение:** ключ, начинающийся с цифры (спецификация это разрешает), будет разобран как число. В `envee.toml` таких нет.
 - [ ] Шаг 10 — `toml/value.zig`, `toml/parser.zig`, канонический хеш
 - [ ] Шаг 11 — `config.zig`
 - [ ] Шаг 12 — `resolver.zig`
@@ -516,3 +518,4 @@ error.SkipZigTest — пропустить тест (нет бинаря shell'�
 
 - README: пути `~/.local/share/envee/...` верны только для Linux; на macOS это `~/Library/Application Support/envee/...`. Исправить в README на шаге 23.
 - `config/parse.go`: TODO про line/col в ошибках парсинга — в Zig сделать сразу (шаг 10).
+- `template/template.go`: шапка пакета обещает фильтры `json` и `base64`, но `applyFilter` их не реализует — на них возвращается «unknown filter». Zig повторяет ПОВЕДЕНИЕ (ошибка), не документацию. На шаге 23 решить: реализовать оба фильтра или убрать из doc-комментария и ADR-0011.
