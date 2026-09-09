@@ -26,4 +26,5 @@ test "smoke" {
 // По мере появления новых файлов — добавлять сюда.
 test {
     _ = @import("env.zig");
+    _ = @import("shell/escape.zig");
 }
