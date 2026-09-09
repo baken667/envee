@@ -1,14 +1,36 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    // Метаданные сборки. В Go их вписывали через -ldflags -X; здесь это
+    // обычный модуль, который генерирует сама система сборки.
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", b.option(
+        []const u8,
+        "version",
+        "version string reported by `envee version`",
+    ) orelse "0.0.0-dev");
+    options.addOption([]const u8, "commit", b.option(
+        []const u8,
+        "commit",
+        "git commit the binary was built from",
+    ) orelse "unknown");
+    options.addOption([]const u8, "date", b.option(
+        []const u8,
+        "date",
+        "RFC3339 build timestamp",
+    ) orelse "unknown");
+    options.addOption([]const u8, "zig_version", builtin.zig_version_string);
 
     const root = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
+    root.addOptions("build_options", options);
 
     const exe = b.addExecutable(.{
         .name = "envee",
@@ -20,18 +42,6 @@ pub fn build(b: *std.Build) void {
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| run_cmd.addArgs(args);
     b.step("run", "Build and run envee").dependOn(&run_cmd.step);
-
-    // ВРЕМЕННО: бинарь только для scripts/parity.sh, пока настоящего CLI нет.
-    // Удалить вместе с src/dev_main.zig на шаге 15 (см. docs/zig-rewrite-steps.md).
-    const dev_exe = b.addExecutable(.{
-        .name = "envee-dev",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/dev_main.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    b.installArtifact(dev_exe);
 
     const tests = b.addTest(.{ .root_module = root });
     const run_tests = b.addRunArtifact(tests);
