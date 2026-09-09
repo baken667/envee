@@ -70,7 +70,7 @@ pub fn runList(ctx: *Ctx, parsed: args_mod.Parsed) Error!void {
             \\No plugins found.
             \\
             \\envee discovers executables named envee-plugin-<name> on $PATH.
-            \\The bundled local store is available as: go install github.com/baken667/envee/plugins/env
+            \\The bundled local store, envee-plugin-env, ships in the same archive as envee.
             \\
         );
         return;

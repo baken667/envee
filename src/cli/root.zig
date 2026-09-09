@@ -337,7 +337,7 @@ pub fn runWithStopAt(ctx: *Ctx, parsed: args_mod.Parsed, stop_at: []const u8) Er
     if (parsed.path.len >= 2 and std.mem.eql(u8, parsed.path[1].name, "plugin")) {
         if (std.mem.eql(u8, name, "list")) return plugin_cmd.runList(ctx, parsed);
         if (std.mem.eql(u8, name, "info")) return plugin_cmd.runInfo(ctx, parsed);
-        return notImplemented(ctx, "envee plugin install", "Install plugins with your package manager, e.g. `go install github.com/baken667/envee/plugins/env@latest`.");
+        return notImplemented(ctx, "envee plugin install", "Install plugins with your package manager; envee-plugin-env ships in the same archive as envee.");
     }
     if (parsed.path.len >= 2 and std.mem.eql(u8, parsed.path[1].name, "daemon")) {
         if (std.mem.eql(u8, name, "status")) return status_cmd.runDaemonStatus(ctx, parsed);

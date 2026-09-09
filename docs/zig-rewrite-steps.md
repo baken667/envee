@@ -73,7 +73,9 @@
   - **Добавлено к интерфейсу:** `TrustGate.untrusted` — список неодобренных источников для `status`/`doctor`, которым нужен список, а не первая ошибка; `Metadata` с `?[]` вместо `[]`, чтобы `plugin list --json` показывал `null` там, где его прислал плагин (и Go).
 - [x] Шаг 22 — `zig build release` собирает пять целей (`x86_64/aarch64-linux-musl`, `x86_64/aarch64-macos`, `x86_64-windows`) в `zig-out/release/<target>/`, ReleaseSafe + strip, без `.pdb`; `-Dversion/-Dcommit/-Ddate` были с шага 15. CI: `zig-test` (ubuntu/macos/windows, windows только сборка; fish/zsh/nu ставятся на Linux, чтобы hook-тесты не пропускались), `zig-release`, `parity`. Makefile: `zig-build`, `zig-test`, `zig-release`, `parity`. 2026-09-09
   - **Найдено по ходу, при кросс-компиляции:** в std 0.16 нет `posix.getuid` (Linux — `std.os.linux.getuid`, остальные — `std.c.getuid`), а у `Io.File.Permissions` на Windows нет `fromMode`. Все режимы файлов идут через `src/perms.zig`, который на Windows отдаёт умолчание.
-- [ ] Шаг 23 — ADR-0019/0020, README, удаление Go, homebrew formula
+- [x] Шаг 23 — ADR-0019 (Zig, supersedes 0001) и ADR-0020 (канонический хеш v2), README/CHANGELOG 0.4.0/CONTRIBUTING/SECURITY; фильтры `json`/`base64` реализованы (ADR-0011 теперь правда). Go удалён: `cmd/`, `internal/`, `plugins/`, `go.mod`, `go.sum`, golangci, goreleaser, `scripts/parity.sh`, `release-staging.yml`. `pkg/sdk-go` оставлен со своим `go.mod` (дефолт из таблицы решений). Новый `release.yml`: `zig build release` → архивы с прежними именами → `checksums.txt` + keyless cosign → GitHub release → формула из `packaging/homebrew/envee.rb.tmpl` в tap (stable) или tap-staging (pre-release). CI: test-матрица, release-build, sdk-go. 356 тестов. 2026-09-09
+  - **Не проверено здесь:** сам прогон `release.yml` (нужен тег и секреты tap'а). Формула проверена только глазами; `brew audit` — при первом релизе.
+  - **Изменено при удалении:** тест «демо-плагин Go SDK резолвится Zig-ядром» собирает плагин из `pkg/sdk-go` как из отдельного модуля.
 
 ## Окружение (проверено 2026-09-09)
 
