@@ -24,6 +24,7 @@ const errs = @import("../errs.zig");
 const gopath = @import("../path.zig");
 const log = @import("../log.zig");
 const resolve_cmd = @import("resolve.zig");
+const trust_cmd = @import("trust.zig");
 const shell = @import("../shell/shell.zig");
 
 pub const build_options = @import("build_options");
@@ -194,8 +195,9 @@ pub const root: args_mod.Command = .{
             .short = "Trust envee.toml (review and approve its content)",
             .args = .any,
             .flags = &.{
-                .{ .long = "yes", .short = 'y', .help = "approve without prompting" },
-                .{ .long = "ttl", .kind = .{ .string = "" }, .help = "expire the approval after this duration" },
+                .{ .long = "yes", .short = 'y', .help = "auto-approve without interactive prompt" },
+                .{ .long = "ttl", .kind = .{ .string = "never" }, .help = "trust TTL (e.g., 24h, 7d, never)" },
+                .{ .long = "remove", .help = "remove trust entry" },
             },
         },
         .{ .name = "version", .short = "Show envee version" },
@@ -209,10 +211,25 @@ pub const root: args_mod.Command = .{
 
 // ---- выполнение ------------------------------------------------------------
 
-pub const Error = context.Error || args_mod.Error || check_cmd.Error;
+pub const Error = context.Error || args_mod.Error || check_cmd.Error || trust_cmd.Error;
 
 pub fn run(ctx: *Ctx, parsed: args_mod.Parsed) Error!void {
     return runWithStopAt(ctx, parsed, "");
+}
+
+/// Как `runWithStopAt`, но с явным источником ответов для `envee trust`.
+/// В проде это терминал; тесты подставляют заранее заданную
+/// последовательность.
+pub fn runWith(
+    ctx: *Ctx,
+    parsed: args_mod.Parsed,
+    stop_at: []const u8,
+    asker: ?trust_cmd.Asker,
+) Error!void {
+    const name = parsed.command.name;
+    if (std.mem.eql(u8, name, "trust")) return trust_cmd.runTrust(ctx, parsed, asker);
+    if (std.mem.eql(u8, name, "deny")) return trust_cmd.runDeny(ctx, parsed);
+    return runWithStopAt(ctx, parsed, stop_at);
 }
 
 /// `stop_at` ограничивает подъём по дереву каталогов. В проде пусто; тесты
@@ -226,6 +243,8 @@ pub fn runWithStopAt(ctx: *Ctx, parsed: args_mod.Parsed, stop_at: []const u8) Er
     if (std.mem.eql(u8, name, "resolve")) return resolve_cmd.runResolve(ctx, parsed, stop_at);
     if (std.mem.eql(u8, name, "diff")) return resolve_cmd.runDiff(ctx, parsed, stop_at);
     if (std.mem.eql(u8, name, "check")) return check_cmd.runWithStopAt(ctx, parsed, stop_at);
+    if (std.mem.eql(u8, name, "trust")) return trust_cmd.runTrust(ctx, parsed, null);
+    if (std.mem.eql(u8, name, "deny")) return trust_cmd.runDeny(ctx, parsed);
     return notImplemented(ctx, parsed);
 }
 
@@ -571,6 +590,50 @@ test "the dependency list covers configs, files and watched paths" {
         };
     }
     try testing.expect(std.mem.indexOf(u8, out, tmp.path) != null);
+}
+
+// Ошибка применения директив обязана дойти до пользователя с кодом,
+// объяснением и подсказкой, а не голым именем ошибки.
+test "a directive error carries a full diagnostic" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const tmp = try harness.TempDir.create(a);
+    defer tmp.destroy();
+    try tmp.write(a,
+        \\[profiles.prod]
+        \\required = ["NOWHERE"]
+        \\[profiles.prod.env]
+        \\OTHER = "1"
+    );
+
+    errs.reset();
+    try testing.expectError(
+        error.RequiredVarMissing,
+        harness.run(a, tmp, &.{ "--profile", "prod", "eval", "bash" }, &.{}),
+    );
+    const d = errs.take().?;
+    try testing.expectEqual(errs.Code.e008, d.code);
+    try testing.expectEqual(@as(u8, 4), d.exitCode());
+    try testing.expectEqualStrings("NOWHERE", d.context[0].value);
+    // Имя профиля настоящее, а не литерал "?", как в Go.
+    try testing.expectEqualStrings("prod", d.context[1].value);
+    try testing.expect(d.hint.len > 0);
+}
+
+test "a template cycle carries the chain" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const tmp = try harness.TempDir.create(a);
+    defer tmp.destroy();
+    try tmp.write(a, "[env]\nA = \"{{env.B}}\"\nB = \"{{env.A}}\"\n");
+
+    errs.reset();
+    try testing.expectError(error.CycleDetected, harness.run(a, tmp, &.{ "eval", "bash" }, &.{}));
+    const d = errs.take().?;
+    try testing.expectEqual(errs.Code.e007, d.code);
+    try testing.expect(std.mem.indexOf(u8, d.context[0].value, "->") != null);
 }
 
 test "unimplemented commands say so instead of pretending" {
