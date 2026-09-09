@@ -107,46 +107,62 @@ pub const Metadata = struct {
     version: []const u8 = "",
     api_version: i64 = 0,
     description: []const u8 = "",
-    capabilities: []const []const u8 = &.{},
+    /// Списки необязательные, а не пустые по умолчанию: Go пишет пустой
+    /// срез как `null`, и `plugin list --json` обязан показать то же, что
+    /// прислал плагин.
+    capabilities: ?[]const []const u8 = null,
     permissions: Permissions = .{},
 
     pub const Permissions = struct {
         network: bool = false,
-        filesystem: []const []const u8 = &.{},
-        exec: []const []const u8 = &.{},
+        filesystem: ?[]const []const u8 = null,
+        exec: ?[]const []const u8 = null,
     };
 };
 
-/// Разбор метаданных. Промежуточная структура с необязательными списками:
-/// Go сериализует пустой срез как `null`, и `"exec":null` от настоящего
-/// плагина обязан разбираться, а не отвергаться.
+/// Метаданные как JSON в форме Go (`encoding/json` для `plugin.Metadata`):
+/// порядок полей структуры, `null` для отсутствующих списков.
+pub fn writeMetadataJson(w: *Writer, md: Metadata, indent: usize) Writer.Error!void {
+    const pad = "                                ";
+    const in1 = pad[0..@min(pad.len, indent + 2)];
+    const in2 = pad[0..@min(pad.len, indent + 4)];
+    const in0 = pad[0..@min(pad.len, indent)];
+    try w.writeAll("{\n");
+    try w.print("{s}\"name\": ", .{in1});
+    try std.json.Stringify.value(md.name, .{}, w);
+    try w.print(",\n{s}\"version\": ", .{in1});
+    try std.json.Stringify.value(md.version, .{}, w);
+    try w.print(",\n{s}\"api_version\": {d}", .{ in1, md.api_version });
+    try w.print(",\n{s}\"description\": ", .{in1});
+    try std.json.Stringify.value(md.description, .{}, w);
+    try w.print(",\n{s}\"capabilities\": ", .{in1});
+    try writeStringList(w, md.capabilities, indent + 2);
+    try w.print(",\n{s}\"permissions\": {{\n{s}\"network\": {}", .{ in1, in2, md.permissions.network });
+    try w.print(",\n{s}\"filesystem\": ", .{in2});
+    try writeStringList(w, md.permissions.filesystem, indent + 4);
+    try w.print(",\n{s}\"exec\": ", .{in2});
+    try writeStringList(w, md.permissions.exec, indent + 4);
+    try w.print("\n{s}}}\n{s}}}", .{ in1, in0 });
+}
+
+fn writeStringList(w: *Writer, list: ?[]const []const u8, indent: usize) Writer.Error!void {
+    const items = list orelse return w.writeAll("null");
+    if (items.len == 0) return w.writeAll("[]");
+    const pad = "                                ";
+    try w.writeAll("[");
+    for (items, 0..) |item, i| {
+        if (i > 0) try w.writeAll(",");
+        try w.print("\n{s}", .{pad[0..@min(pad.len, indent + 2)]});
+        try std.json.Stringify.value(item, .{}, w);
+    }
+    try w.print("\n{s}]", .{pad[0..@min(pad.len, indent)]});
+}
+
+/// Разбор метаданных. Списки — `?[]const u8`, и это не случайно: Go
+/// сериализует пустой срез как `null` (`"exec":null` у настоящего
+/// `envee-plugin-env`), а `std.json` не кладёт `null` в срез.
 pub fn parseMetadata(arena: Allocator, bytes: []const u8) !Metadata {
-    const Raw = struct {
-        name: []const u8 = "",
-        version: []const u8 = "",
-        api_version: i64 = 0,
-        description: []const u8 = "",
-        capabilities: ?[]const []const u8 = null,
-        permissions: ?struct {
-            network: bool = false,
-            filesystem: ?[]const []const u8 = null,
-            exec: ?[]const []const u8 = null,
-        } = null,
-    };
-    const raw = try std.json.parseFromSliceLeaky(Raw, arena, bytes, .{ .ignore_unknown_fields = true });
-    var md: Metadata = .{
-        .name = raw.name,
-        .version = raw.version,
-        .api_version = raw.api_version,
-        .description = raw.description,
-        .capabilities = raw.capabilities orelse &.{},
-    };
-    if (raw.permissions) |perm| md.permissions = .{
-        .network = perm.network,
-        .filesystem = perm.filesystem orelse &.{},
-        .exec = perm.exec orelse &.{},
-    };
-    return md;
+    return std.json.parseFromSliceLeaky(Metadata, arena, bytes, .{ .ignore_unknown_fields = true });
 }
 
 /// Плагин, за которым стоит внешний бинарь.
@@ -508,8 +524,8 @@ test "metadata is fetched, parsed and cached" {
     try testing.expectEqualStrings("fake", md.name);
     try testing.expectEqualStrings("9.9.9", md.version);
     try testing.expectEqual(@as(i64, 1), md.api_version);
-    try testing.expectEqual(@as(usize, 1), md.capabilities.len);
-    try testing.expectEqualStrings("secret", md.capabilities[0]);
+    try testing.expectEqual(@as(usize, 1), md.capabilities.?.len);
+    try testing.expectEqualStrings("secret", md.capabilities.?[0]);
 
     // Ломаем путь: кэшированный результат обязан вернуться и без бинаря.
     p.path = try d.tmp.join(a, "does-not-exist");
@@ -662,14 +678,36 @@ test "metadata from the Go env plugin parses, null lists included" {
         \\{"name":"env","version":"0.1.0","api_version":1,"description":"Local key-value secret store (envee secret set/unset/list)","capabilities":["secret"],"permissions":{"network":false,"filesystem":["$XDG_DATA_HOME/envee/secrets/env.json"],"exec":null}}
     );
     try testing.expectEqualStrings("env", md.name);
-    try testing.expectEqual(@as(usize, 1), md.permissions.filesystem.len);
-    try testing.expectEqual(@as(usize, 0), md.permissions.exec.len);
+    try testing.expectEqual(@as(usize, 1), md.permissions.filesystem.?.len);
+    try testing.expect(md.permissions.exec == null);
     try testing.expect(!md.permissions.network);
 
     // Минимальный ответ тоже годится: всё необязательное — по умолчанию.
     const bare = try parseMetadata(a, "{\"name\":\"x\"}");
     try testing.expectEqualStrings("x", bare.name);
-    try testing.expectEqual(@as(usize, 0), bare.capabilities.len);
+    try testing.expect(bare.capabilities == null);
+
+    // И обратно в JSON — в форме Go, с `null` там, где он был.
+    var out: Writer.Allocating = .init(a);
+    try writeMetadataJson(&out.writer, md, 0);
+    try testing.expectEqualStrings(
+        \\{
+        \\  "name": "env",
+        \\  "version": "0.1.0",
+        \\  "api_version": 1,
+        \\  "description": "Local key-value secret store (envee secret set/unset/list)",
+        \\  "capabilities": [
+        \\    "secret"
+        \\  ],
+        \\  "permissions": {
+        \\    "network": false,
+        \\    "filesystem": [
+        \\      "$XDG_DATA_HOME/envee/secrets/env.json"
+        \\    ],
+        \\    "exec": null
+        \\  }
+        \\}
+    , out.written());
 }
 
 test "plugin names are the suffix after the prefix" {

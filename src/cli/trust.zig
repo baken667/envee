@@ -44,7 +44,17 @@ pub const Gate = struct {
     arena: Allocator,
 
     pub fn trustGate(g: *Gate) context.TrustGate {
-        return .{ .ctx = g, .checkFn = check };
+        return .{ .ctx = g, .checkFn = check, .untrustedFn = untrusted };
+    }
+
+    fn untrusted(ctx: *anyopaque, arena: Allocator, sources: []const config.SourceFile) Allocator.Error![]const config.SourceFile {
+        const g: *Gate = @ptrCast(@alignCast(ctx));
+        var out: std.ArrayList(config.SourceFile) = .empty;
+        for (sources) |src| {
+            const st = g.store.status(arena, src.path, src.hash) catch store_mod.Status.unknown;
+            if (st != .trusted) try out.append(arena, src);
+        }
+        return out.toOwnedSlice(arena);
     }
 
     fn check(ctx: *anyopaque, sources: []const config.SourceFile) errs.Error!void {

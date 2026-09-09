@@ -110,7 +110,7 @@ fn dispatch(
     // честно откажется, а не одобрит молча.
     var stdin_asker: trust_cmd.StdinAsker = .{ .io = io, .out = err_out };
     try cli.runWith(&ctx, parsed, "", stdin_asker.asker());
-    return 0;
+    return ctx.exit_code;
 }
 
 // Заставляет компилятор включить тесты из всех модулей.
@@ -147,4 +147,8 @@ test {
     _ = @import("cli/secret.zig");
     _ = @import("secret_store.zig");
     _ = @import("plugins/env.zig");
+    _ = @import("cli/status.zig");
+    _ = @import("cli/plugin_cmd.zig");
+    _ = @import("cli/exec.zig");
+    _ = @import("cli/completion.zig");
 }

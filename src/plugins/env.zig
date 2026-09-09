@@ -206,9 +206,9 @@ test "metadata is what the core expects" {
     const md = try plugin_mod.parseMetadata(a, r.stdout);
     try testing.expectEqualStrings("env", md.name);
     try testing.expectEqual(api_version, md.api_version);
-    try testing.expectEqualStrings("secret", md.capabilities[0]);
+    try testing.expectEqualStrings("secret", md.capabilities.?[0]);
     try testing.expect(!md.permissions.network);
-    try testing.expectEqualStrings("$XDG_DATA_HOME/envee/secrets/env.json", md.permissions.filesystem[0]);
+    try testing.expectEqualStrings("$XDG_DATA_HOME/envee/secrets/env.json", md.permissions.filesystem.?[0]);
 }
 
 test "resolve returns the stored value with request id and default TTL" {

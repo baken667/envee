@@ -19,10 +19,19 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 GO_BIN="$PWD/bin/envee"
 ZIG_BIN="$PWD/zig-out/bin/envee"
 
+# Хранилища доверия — у каждой реализации своё (см. ниже, почему).
+GO_TRUST=/tmp/envee-parity-go
+ZIG_TRUST=/tmp/envee-parity-zig
+
 if [[ "${1:-}" != "--no-build" ]]; then
   echo "==> building both implementations"
-  make build >/dev/null
-  zig build
+  # Одни и те же версия, коммит и дата: `version` и `doctor` печатают их,
+  # и сверять их побайтно можно только так.
+  VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)"
+  COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  make build VERSION="$VERSION" COMMIT="$COMMIT" DATE="$DATE" >/dev/null
+  zig build -Dversion="$VERSION" -Dcommit="$COMMIT" -Ddate="$DATE"
 fi
 
 pass=0
@@ -37,8 +46,29 @@ fail=0
 normalize() {
   sed -E -e "s#${ZIG_BIN}#SELF#g" \
          -e "s#${GO_BIN}#SELF#g" \
+         -e "s#${GO_TRUST}#STORE#g" \
+         -e "s#${ZIG_TRUST}#STORE#g" \
          -e "s#${PWD}#ROOT#g" \
          -e "s#sha256:[0-9a-f]{64}#sha256:HASH#g"
+}
+
+# check_commands <name> <subcommand...>
+#
+# Список команд в справке — тот же состав, не побайтно: cobra сортирует
+# команды и флаги и добавляет свою `help`, здесь порядок объявления.
+check_commands() {
+  local name="$1"; shift
+  local go_list zig_list
+  go_list="$("$GO_BIN" "$@" --help 2>&1 | awk '/^Available Commands:/{f=1;next} /^$/{f=0} f{print $1}' | grep -v '^help$' | sort)"
+  zig_list="$("$ZIG_BIN" "$@" --help 2>&1 | awk '/^Available Commands:/{f=1;next} /^$/{f=0} f{print $1}' | sort)"
+  if [[ "$go_list" == "$zig_list" ]]; then
+    echo "ok   $name"
+    pass=$((pass + 1))
+  else
+    echo "FAIL $name"
+    diff <(printf '%s\n' "$go_list") <(printf '%s\n' "$zig_list") | sed 's/^/     /' || true
+    fail=$((fail + 1))
+  fi
 }
 
 # Строка присваивания $PATH исключается из сравнения намеренно: Go дублирует
@@ -208,8 +238,6 @@ done
 # Строка присваивания $PATH из сравнения исключена: Go дублирует в ней
 # текущий PATH. Что Zig так не делает — отдельная проверка ниже.
 
-GO_TRUST=/tmp/envee-parity-go
-ZIG_TRUST=/tmp/envee-parity-zig
 rm -rf "$GO_TRUST" "$ZIG_TRUST"
 
 # examples/secrets читает секреты через envee-plugin-env. Плагин пока
@@ -317,6 +345,56 @@ check "Zig core + Zig plugin: missing required secret" \
   env -i HOME="$HOME" PATH="$ZIG_PLUGIN_PATH" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" eval bash
 CHECK_DIR="."
 rm -rf "$ZIG_PLUGIN_DIR"
+
+# ---- остальные команды (шаг 21) --------------------------------------------
+# status, doctor, plugin, daemon, exec, скрытые not-implemented. Версия,
+# коммит и дата у бинарей общие (см. сборку выше), пути к бинарям и
+# хранилищам нормализуются.
+
+for parent in "" plugin daemon secret; do
+  check_commands "help lists the same commands: envee $parent" $parent
+done
+
+CHECK_DIR="examples/basic"
+for cmd in "status" "status --json" "status --show-secrets" "status --plugins --daemon" "status --json --plugins --daemon" \
+           "doctor" "doctor --json" \
+           "plugin list" "plugin list --json" "plugin info env" "plugin info env --json" "plugin info nope" \
+           "daemon status" "daemon status --json" "telemetry status" \
+           "telemetry enable" "plugin install x" "daemon start" "daemon stop" "debug" "doctor --fix" "upgrade" \
+           "exec"; do
+  # shellcheck disable=SC2086
+  check "$cmd $CHECK_DIR" \
+    env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" $cmd \
+    -- \
+    env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" $cmd
+done
+# `--` внутри команды спутал бы разделитель самого check, поэтому exec
+# заворачивается в sh.
+check "exec runs the command with the resolved env" \
+  env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$GO_TRUST" sh -c '"$0" exec -- sh -c "echo APP=$SERVICE_NAME; exit 3"; echo "exit=$?"' "$GO_BIN" \
+  -- \
+  env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$ZIG_TRUST" sh -c '"$0" exec -- sh -c "echo APP=$SERVICE_NAME; exit 3"; echo "exit=$?"' "$ZIG_BIN"
+
+# Неодобренный конфиг: status показывает его, а не падает.
+( cd examples/basic && XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" trust --remove >/dev/null 2>&1 ) || true
+( cd examples/basic && XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" trust --remove >/dev/null 2>&1 ) || true
+check "status on an untrusted config" \
+  env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" status \
+  -- \
+  env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" status
+check "doctor on an untrusted config" \
+  env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" doctor \
+  -- \
+  env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" doctor
+( cd examples/basic && XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" trust --yes >/dev/null 2>&1 ) || true
+( cd examples/basic && XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" trust --yes >/dev/null 2>&1 ) || true
+# Неподдерживаемая оболочка для completion: Go печатает голую строку
+# ошибки без кода, здесь — E003 с подсказкой. Осознанное расхождение.
+expect_diff "Go prints a bare error for an unsupported completion shell" "completion tcsh" \
+  env -i HOME="$HOME" PATH="/usr/bin:/bin" "$GO_BIN" completion tcsh \
+  -- \
+  env -i HOME="$HOME" PATH="/usr/bin:/bin" "$ZIG_BIN" completion tcsh
+CHECK_DIR="."
 
 # ---- подписи: крест-накрест ------------------------------------------------
 # Подпись, сделанная одной реализацией, обязана проверяться другой. Это
