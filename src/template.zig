@@ -234,6 +234,18 @@ fn applyFilter(
     if (std.mem.eql(u8, f.name, "quote")) {
         return escape.singleQuote(gpa, input);
     }
+    // Обещаны ADR-0011, в Go так и не были реализованы. `json` даёт строку в
+    // кавычках JSON, как `json.Marshal` строки в Go.
+    if (std.mem.eql(u8, f.name, "json")) {
+        var out: std.Io.Writer.Allocating = .init(gpa);
+        std.json.Stringify.value(input, .{}, &out.writer) catch return error.OutOfMemory;
+        return out.toOwnedSlice();
+    }
+    if (std.mem.eql(u8, f.name, "base64")) {
+        const out = try gpa.alloc(u8, std.base64.standard.Encoder.calcSize(input.len));
+        _ = std.base64.standard.Encoder.encode(out, input);
+        return out;
+    }
     if (diag) |d| d.name = f.name;
     return error.UnknownFilter;
 }
@@ -431,17 +443,22 @@ test "errors" {
         error.MissingClosingParen,
         render(testing.allocator, test_io, "{{profile | default('x'}}", .{ .profile = "dev" }, &diag),
     );
+}
 
-    // json и base64 обещаны шапкой Go-пакета, но не реализованы там — и здесь
-    // тоже, чтобы поведение совпадало.
-    try testing.expectError(
-        error.UnknownFilter,
-        render(testing.allocator, test_io, "{{profile | json}}", .{ .profile = "dev" }, &diag),
-    );
-    try testing.expectError(
-        error.UnknownFilter,
-        render(testing.allocator, test_io, "{{profile | base64}}", .{ .profile = "dev" }, &diag),
-    );
+// json и base64 обещаны ADR-0011, а в Go так и не были реализованы. Здесь
+// они есть: документация обязана быть правдой.
+test "the json and base64 filters encode the value" {
+    const json = try render(testing.allocator, test_io, "{{profile | json}}", .{ .profile = "de\"v" }, null);
+    defer testing.allocator.free(json);
+    try testing.expectEqualStrings("\"de\\\"v\"", json);
+
+    const b64 = try render(testing.allocator, test_io, "{{profile | base64}}", .{ .profile = "dev" }, null);
+    defer testing.allocator.free(b64);
+    try testing.expectEqualStrings("ZGV2", b64);
+
+    const empty = try render(testing.allocator, test_io, "{{profile | base64}}", .{ .profile = "" }, null);
+    defer testing.allocator.free(empty);
+    try testing.expectEqualStrings("", empty);
 }
 
 test "extractVarRefs" {
