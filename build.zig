@@ -43,7 +43,29 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_cmd.addArgs(args);
     b.step("run", "Build and run envee").dependOn(&run_cmd.step);
 
-    const tests = b.addTest(.{ .root_module = root });
+    // Поддельный плагин для тестов plugin.zig. Отдельный модуль для тестов
+    // нужен, чтобы путь к нему не попадал в боевой бинарь и чтобы `zig build`
+    // не собирал его без надобности.
+    const fake_plugin = b.addExecutable(.{
+        .name = "envee-plugin-fake",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/testing/fakeplugin.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const test_options = b.addOptions();
+    test_options.addOptionPath("fake_plugin", fake_plugin.getEmittedBin());
+
+    const test_root = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_root.addOptions("build_options", options);
+    test_root.addOptions("test_options", test_options);
+
+    const tests = b.addTest(.{ .root_module = test_root });
     const run_tests = b.addRunArtifact(tests);
     b.step("test", "Run unit tests").dependOn(&run_tests.step);
 }

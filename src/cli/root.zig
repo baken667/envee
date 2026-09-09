@@ -25,6 +25,7 @@ const gopath = @import("../path.zig");
 const log = @import("../log.zig");
 const resolve_cmd = @import("resolve.zig");
 const trust_cmd = @import("trust.zig");
+const secret_cmd = @import("secret.zig");
 const shell = @import("../shell/shell.zig");
 
 pub const build_options = @import("build_options");
@@ -250,6 +251,7 @@ pub fn runWithStopAt(ctx: *Ctx, parsed: args_mod.Parsed, stop_at: []const u8) Er
     if (std.mem.eql(u8, name, "check")) return check_cmd.runWithStopAt(ctx, parsed, stop_at);
     if (std.mem.eql(u8, name, "trust")) return trust_cmd.runTrust(ctx, parsed, null);
     if (std.mem.eql(u8, name, "deny")) return trust_cmd.runDeny(ctx, parsed);
+    if (parsed.path.len >= 2 and std.mem.eql(u8, parsed.path[1].name, "secret")) return secret_cmd.run(ctx, parsed);
     return notImplemented(ctx, parsed);
 }
 
