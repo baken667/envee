@@ -81,6 +81,17 @@ pub const PluginResolver = struct {
         source: []const u8,
         ref: []const u8,
     ) anyerror![]const u8,
+    /// Подробности последней ошибки, если реализация их хранит. Имя ошибки
+    /// говорит «плагин упал», а подробности — почему именно.
+    detailFn: ?*const fn (ctx: *anyopaque) []const u8 = null,
+
+    pub fn detail(p: PluginResolver, err: anyerror) []const u8 {
+        if (p.detailFn) |f| {
+            const d = f(p.ctx);
+            if (d.len > 0) return d;
+        }
+        return @errorName(err);
+    }
 
     pub fn resolve(
         p: PluginResolver,
@@ -424,7 +435,7 @@ fn applySecrets(
             // пропускается: плагин может быть не настроен, и это не повод
             // ломать всю оболочку.
             if (!s.ref.required) continue;
-            if (diag) |d| d.* = .{ .key = s.name, .detail = @errorName(err) };
+            if (diag) |d| d.* = .{ .key = s.name, .detail = r.detail(err) };
             return error.SecretFailed;
         };
         try res.env.setEntry(arena, .{

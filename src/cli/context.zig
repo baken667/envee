@@ -18,6 +18,7 @@ const env_mod = @import("../env.zig");
 const errs = @import("../errs.zig");
 const gopath = @import("../path.zig");
 const paths_mod = @import("../paths.zig");
+const plugin = @import("../plugin.zig");
 const resolver_mod = @import("../resolver.zig");
 const shell = @import("../shell/shell.zig");
 
@@ -173,13 +174,18 @@ pub fn resolveEnv(ctx: *Ctx, profile_flag: []const u8, stop_at: []const u8) Erro
     const loaded = try loadConfig(ctx, activeProfile(ctx, profile_flag), stop_at);
     try ctx.trust.check(loaded.cfg.sources);
 
+    // Плагины ищутся только если конфиг объявляет секреты — и только после
+    // проверки доверия выше: обнаружение запускает чужие бинари.
+    var dispatcher = try plugin.dispatcherFor(ctx.arena, ctx.io, ctx.environ, loaded.cfg);
+    const resolver: ?directive.PluginResolver = if (dispatcher) |*d| d.resolver() else null;
+
     var diag: directive.Diagnostics = .{};
     const result = directive.apply(ctx.arena, ctx.io, loaded.cfg, .{
         .config_root = loaded.config_root,
         .profile = loaded.profile,
         .cwd = ctx.cwd,
         .os_env = &ctx.os_env,
-    }, null, &diag) catch |err| return liftDirectiveError(err, diag);
+    }, resolver, &diag) catch |err| return liftDirectiveError(err, diag);
 
     return .{ .loaded = loaded, .result = result };
 }

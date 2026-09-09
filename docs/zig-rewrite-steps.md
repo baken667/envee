@@ -61,7 +61,9 @@
   - **Найдено по ходу, у себя:** ошибки применения директив не превращались в диагностику, и пользователь видел голое `Error: RequiredVarMissing` вместо кода, объяснения и подсказки. Исправлено в `context.liftDirectiveError`, покрыто двумя тестами.
   - **Найдено по ходу, в parity-скрипте:** `set -e` обрывал прогон на первом расхождении, и остальные проверки просто не выполнялись.
 - [x] Шаг 18 — `trust/sign.zig`, `trust/ssh_key.zig`, `trust --sign/--from`
-- [ ] Шаг 19 — `plugin.zig`, команды `secret *`
+- [x] Шаг 19 — `plugin.zig` (поиск `envee-plugin-*` в PATH, `metadata`/`resolve` с общим сроком через `MultiReader.fill(deadline)` + `child.kill`, диспетчер как `directive.PluginResolver`, ленивое обнаружение только при секретах в конфиге), `cli/secret.zig` (`set/unset/list/get`, файл как у Go-плагина), поддельный плагин `src/testing/fakeplugin.zig` через `test_options`. 337 тестов. Parity: `examples/secrets` сверяется по-настоящему через Go-плагин `env`, xfail снят. 2026-09-09
+  - **Найдено по ходу, в протоколе:** Go пишет пустой срез как `null` (`"exec":null` в метаданных настоящего `envee-plugin-env`), и `std.json` не кладёт `null` в срез. Разбор идёт через промежуточную структуру с `?[]const u8`; на выходе Go-плагина есть регрессионный тест.
+  - **Добавлено к интерфейсу:** `PluginResolver.detailFn` — без него в E004 попадало бы имя ошибки Zig вместо сообщения плагина (`E_NOT_FOUND: no such secret: …`).
 - [ ] Шаг 20 — `envee-plugin-env` на Zig
 - [ ] Шаг 21 — `status`, `exec`, `doctor`, `plugin list/info`, `daemon status`, `completion`, скрытые not-implemented
 - [ ] Шаг 22 — cross-compile в `build.zig`, GitHub Actions

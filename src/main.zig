@@ -143,4 +143,6 @@ test {
     _ = @import("trust/ssh_key.zig");
     _ = @import("trust/sign.zig");
     _ = @import("cli/trust.zig");
+    _ = @import("plugin.zig");
+    _ = @import("cli/secret.zig");
 }

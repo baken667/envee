@@ -212,9 +212,19 @@ GO_TRUST=/tmp/envee-parity-go
 ZIG_TRUST=/tmp/envee-parity-zig
 rm -rf "$GO_TRUST" "$ZIG_TRUST"
 
-# examples/secrets объявляет секреты, а разбор плагинов появится на шаге 19.
-# До тех пор Zig подставляет заглушки там, где Go зовёт плагин и падает.
-SECRETS_REASON="plugin dispatch lands in step 19"
+# examples/secrets читает секреты через envee-plugin-env. Плагин пока
+# Go-версии (свой появится на шаге 20); он должен быть в PATH у обеих
+# реализаций, а хранилище секретов у каждой своё — оно лежит рядом с
+# хранилищем доверия в XDG_DATA_HOME, так что заполняем оба.
+PLUGIN_DIR="$(mktemp -d)"
+go build -o "$PLUGIN_DIR/envee-plugin-env" ./plugins/env
+for bin_and_store in "$GO_BIN:$GO_TRUST" "$ZIG_BIN:$ZIG_TRUST"; do
+  bin="${bin_and_store%%:*}"; store="${bin_and_store#*:}"
+  for kv in DATABASE_PASSWORD=hunter2 GITHUB_TOKEN=ghp_parity AWS_DB_CREDS=creds; do
+    XDG_DATA_HOME="$store" "$bin" secret set "$kv" >/dev/null 2>&1
+  done
+done
+PLUGIN_PATH="/usr/bin:/bin:$PLUGIN_DIR"
 
 for ex in examples/*/; do
   ( cd "$ex" && XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" trust --yes >/dev/null 2>&1 ) || true
@@ -225,17 +235,10 @@ for ex in examples/*/; do
     env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" eval bash
 
   for sh in bash zsh fish nu pwsh; do
-    if [[ "$ex" == "examples/secrets/" ]]; then
-      expect_diff "$SECRETS_REASON" "eval $sh $ex" \
-        env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" eval "$sh" \
-        -- \
-        env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" eval "$sh"
-    else
-      check_no_path "eval $sh $ex" \
-        env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" eval "$sh" \
-        -- \
-        env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" eval "$sh"
-    fi
+    check_no_path "eval $sh $ex" \
+      env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" eval "$sh" \
+      -- \
+      env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" eval "$sh"
   done
 
   # С профилем: у multi-profile от него зависит почти всё.
@@ -249,17 +252,11 @@ for ex in examples/*/; do
         -- \
         env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" --profile prod eval bash
       ;;
-    examples/secrets/)
-      expect_diff "$SECRETS_REASON" "eval bash --profile prod $ex" \
-        env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" --profile prod eval bash \
-        -- \
-        env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" --profile prod eval bash
-      ;;
     *)
       check_no_path "eval bash --profile prod $ex" \
-        env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" --profile prod eval bash \
+        env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" --profile prod eval bash \
         -- \
-        env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" --profile prod eval bash
+        env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" --profile prod eval bash
       ;;
   esac
 
@@ -273,17 +270,11 @@ for ex in examples/*/; do
         -- \
         env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" resolve --json
       ;;
-    examples/secrets/)
-      expect_diff "$SECRETS_REASON" "resolve --json $ex" \
-        env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" resolve --json \
-        -- \
-        env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" resolve --json
-      ;;
     *)
       check "resolve --json $ex" \
-        env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" resolve --json \
+        env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" resolve --json \
         -- \
-        env -i HOME="$HOME" PATH="/usr/bin:/bin" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" resolve --json
+        env -i HOME="$HOME" PATH="$PLUGIN_PATH" XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" resolve --json
       ;;
   esac
   CHECK_DIR="."
@@ -350,6 +341,8 @@ done
 #
 # Шаг 16 закрыт частично: `check` сверяется выше. `resolve --json` и `diff`
 # требуют доверия, поэтому включаются вместе с шагом 17.
+
+rm -rf "$PLUGIN_DIR"
 
 echo
 echo "$pass passed, $fail failed"
