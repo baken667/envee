@@ -42,7 +42,9 @@
 - [x] Шаг 11 — `config.zig`: типы схемы, `parseBytes`/`parseFile`, лифт `env._`→директивы и `watch`→`watched_paths`, профили (вложенные и inline-ключи), `secretRefs` для обеих записей, `sortedKeys`. 159 тестов. Схема сверена с Go на 22 конфигах (5 реальных + 17 синтетических): все поля, все виды директив, оба написания секретов — 0 расхождений. Коммит `bf68b79`. 2026-09-09
   - **Отличие от Go по структуре, не по поведению:** `Directives.secret` — список `NamedSecret`, а не карта. Порядок нужен для детерминированного вывода `status` и `check`; в Go порядок карты приходилось сортировать в каждом потребителе.
 - [x] Шаг 12 — `resolver.zig`: `discover` (подъём по дереву, файлы профиля, `envee.d/*.toml`), `loadAll` (слияние, `stop_search_up`, полный список sources). 171 тест. **Исправлен баг Go: приоритет конфигов был вывернут наизнанку — см. раздел «Найдено в Go».** Коммит `64ec3f1`. 2026-09-09
-- [ ] Шаг 13 — `directive.zig`, `directive/file.zig`
+- [x] Шаг 13 — `directive.zig` (порядок слоёв, coerce, шаблоны с топологическим порядком и поиском циклов, секреты, `prependToPath`), `directive/file.zig` (dotenv/json/toml), `path.zig` (совместимые с Go `clean`/`join`/`dirname`/`basename`/`absPath`, вынесены из template.zig). 203 теста. **Исправлен второй баг Go: `required` проверялся до применения переменных профиля — см. «Найдено в Go».** Дифференциал `apply` на 21 конфиге: 1 ожидаемое расхождение (исправленный баг), 20 совпадений. 2026-09-09
+  - **Отступление:** YAML в `_.file` не поддерживается (в Go тянул `gopkg.in/yaml.v3`). Ни примеры, ни тесты им не пользуются; вместо молчаливого пропуска — внятная ошибка.
+  - **Найдено по ходу:** `std.fs.path.join` не нормализует путь, поэтому `_.path = ["./bin"]` давал `<root>/./bin` вместо `<root>/bin` — мусор прямо в `$PATH`. Отсюда `path.zig` с семантикой Go `filepath.Join`.
 - [ ] Шаг 14 — `cli/args.zig`
 - [ ] Шаг 15 — `cli/root.zig`, `init`, `version`, `eval` — **веха: бинарь пригоден для ежедневного использования**
 - [ ] Шаг 16 — `resolve`, `diff`, `check`
@@ -519,6 +521,40 @@ error.SkipZigTest — пропустить тест (нет бинаря shell'�
 | Формат `version` в trust-entry v2 | шаг 17 | `2`, v1 читается как Unknown |
 
 ## Найдено в Go (для переноса правильного поведения)
+
+### ⚠️ `required` проверяется до применения переменных профиля (`internal/directive/directive.go`)
+
+**Симптом.** В `Apply` вызов `validateRequired(prof, res.Env)` стоит на шаге 2,
+ДО того как в `res.Env` попадают переменные самого профиля (шаг 2, ниже по
+коду) и таблица `[env]` (шаг 3). В этот момент в `res.Env` лежат только
+переменные из `_.file`. Поэтому `required = ["X"]` падает даже тогда, когда
+X объявлен тут же, в `[profiles.<name>.env]`.
+
+**Проверено на выпущенной версии** — падает поставляемый пример:
+
+```
+cd examples/multi-profile && envee trust && envee --profile prod resolve
+[envee] ERROR [E008]: required variable not defined
+[envee]     profile: ?
+[envee]     variable: DATABASE_URL
+```
+
+При том что `[profiles.prod.env]` в том же файле задаёт `DATABASE_URL`.
+Возможность `required` в связке с профилем нерабочая целиком.
+
+Попутно: в контекст ошибки уходит литерал `"?"` вместо имени профиля
+(`errs.RequiredVar(name, "?")`), и пользователь видит `profile: ?`.
+
+**В Zig** проверка перенесена в конец, после файлов, профиля, `[env]`,
+шаблонов и секретов; в диагностику кладётся настоящее имя профиля. Покрыто
+тестами `required is satisfied by the profile's own variables`,
+`required is satisfied by a file and by the env table` и
+`a genuinely missing required variable is still an error`.
+
+**Дифференциал** `apply` на 21 конфиге: единственное расхождение с Go — этот
+случай. Остальные 20 (все типы значений, `false`-снятие, порядок слоёв,
+шаблоны и топологический порядок, профили, секреты, `_.path`, загрузка
+json/toml/dotenv, `ENVEE_*`, циклы) совпадают полностью.
 
 ### ⚠️ Приоритет конфигов вывернут наизнанку (`internal/resolver/resolver.go`)
 
