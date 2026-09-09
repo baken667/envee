@@ -21,3 +21,9 @@ pub fn main(init: std.process.Init) !void {
 test "smoke" {
     try std.testing.expect(1 + 1 == 2);
 }
+
+// Заставляет компилятор включить тесты из всех модулей.
+// По мере появления новых файлов — добавлять сюда.
+test {
+    _ = @import("env.zig");
+}
