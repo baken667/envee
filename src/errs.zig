@@ -117,6 +117,9 @@ pub const Diag = struct {
     hint: []const u8 = "",
     /// Нижележащая ошибка, если она была.
     cause: ?anyerror = null,
+    /// Нижележащая ошибка словами — когда она пришла извне (от плагина) и
+    /// имя ошибки Zig ничего о ней не скажет. Имеет приоритет над `cause`.
+    cause_text: []const u8 = "",
 
     /// Печатает ошибку в том же виде, что и Go-эталон.
     pub fn write(d: Diag, w: *Writer) Writer.Error!void {
@@ -137,7 +140,11 @@ pub const Diag = struct {
         if (d.hint.len > 0) try w.print("\n[envee] HINT: {s}", .{d.hint});
         try w.writeAll("\n[envee] DOC:  ");
         try d.code.writeDocUrl(w);
-        if (d.cause) |c| try w.print("\n[envee] CAUSE: {s}", .{@errorName(c)});
+        if (d.cause_text.len > 0) {
+            try w.print("\n[envee] CAUSE: {s}", .{d.cause_text});
+        } else if (d.cause) |c| {
+            try w.print("\n[envee] CAUSE: {s}", .{@errorName(c)});
+        }
     }
 
     pub fn exitCode(d: Diag) u8 {
