@@ -5,6 +5,7 @@
 //! делает — ему нельзя ничего запускать до одобрения конфига.
 
 const std = @import("std");
+const perms = @import("../perms.zig");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -188,7 +189,7 @@ fn installFake(a: Allocator, tmp: harness.TempDir, names: []const []const u8) !v
     const bin = try std.Io.Dir.cwd().readFileAlloc(io, @import("test_options").fake_plugin, a, .unlimited);
     for (names) |n| {
         const dst = try tmp.join(a, try plugin.exeName(a, n));
-        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = dst, .data = bin, .flags = .{ .permissions = .fromMode(0o755) } });
+        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = dst, .data = bin, .flags = .{ .permissions = perms.fromMode(0o755) } });
     }
 }
 

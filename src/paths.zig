@@ -22,6 +22,7 @@
 //! процесса.
 
 const std = @import("std");
+const perms = @import("perms.zig");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
@@ -110,7 +111,7 @@ pub const Paths = struct {
         }) |dir| {
             _ = try cwd.createDirPathStatus(io, dir, .default_dir);
         }
-        _ = try cwd.createDirPathStatus(io, p.runtime, .fromMode(0o700));
+        _ = try cwd.createDirPathStatus(io, p.runtime, perms.fromMode(0o700));
     }
 };
 
@@ -190,7 +191,9 @@ fn runtimeDir(gpa: Allocator, environ: *const Environ, home: []const u8) Allocat
         for (default_data.parts, 1..) |part, i| buf[i] = part;
         return std.fs.path.join(gpa, buf[0 .. default_data.parts.len + 1]);
     }
-    const uid = std.posix.getuid();
+    // В std 0.16 нет `posix.getuid`; на Linux это прямой системный вызов,
+    // на остальных POSIX — libc.
+    const uid: u64 = if (builtin.os.tag == .linux) std.os.linux.getuid() else std.c.getuid();
     return std.fmt.allocPrint(gpa, "/run/user/{d}", .{uid});
 }
 

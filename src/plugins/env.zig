@@ -8,6 +8,7 @@
 //! Владение: всё из арены вызывающего.
 
 const std = @import("std");
+const perms = @import("../perms.zig");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const Writer = Io.Writer;
@@ -302,7 +303,7 @@ test "the built plugin resolves what `envee secret set` stored" {
 
     const built = @import("test_options").env_plugin;
     const bin = try Io.Dir.cwd().readFileAlloc(io, built, a, .unlimited);
-    try Io.Dir.cwd().writeFile(io, .{ .sub_path = try tmp.join(a, "envee-plugin-env"), .data = bin, .flags = .{ .permissions = .fromMode(0o755) } });
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = try tmp.join(a, "envee-plugin-env"), .data = bin, .flags = .{ .permissions = perms.fromMode(0o755) } });
 
     const xdg = [2][]const u8{ "XDG_DATA_HOME", try tmp.join(a, "xdg") };
     const path_pair = [2][]const u8{ "PATH", tmp.path };

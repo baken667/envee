@@ -37,7 +37,8 @@ CGO_ENABLED     ?= 0
 .PHONY: help all build build-daemon install test test-race test-coverage lint fmt vet \
         clean docs completions manpages run run-debug \
         goreleaser-check goreleaser-snapshot release-snapshot \
-        homebrew-tap-test examples
+        homebrew-tap-test examples \
+        zig-build zig-test zig-release parity
 
 help: ## Show this help.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-25s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -134,8 +135,23 @@ examples: ## Verify examples parse correctly.
 		$(GO) run $(CMD_DIR) check "$$f" || exit 1; \
 	done
 
+# --- Zig implementation (docs/zig-rewrite.md) ---
+
+zig-build: ## Build the Zig envee and envee-plugin-env into zig-out/bin.
+	zig build -Dversion=$(VERSION) -Dcommit=$(COMMIT) -Ddate=$(DATE)
+
+zig-test: ## Run the Zig test suite (zig fmt is checked first).
+	zig fmt --check src build.zig
+	zig build test --summary all
+
+zig-release: ## Cross-compile stripped ReleaseSafe binaries for every target into zig-out/release/.
+	zig build release -Dversion=$(VERSION) -Dcommit=$(COMMIT) -Ddate=$(DATE)
+
+parity: ## Compare the Go and Zig implementations (builds both).
+	./scripts/parity.sh
+
 # --- Cleanup ---
 
 clean: ## Remove build artifacts.
-	rm -rf $(BIN_DIR) $(DIST_DIR) $(COVERAGE_DIR)
+	rm -rf $(BIN_DIR) $(DIST_DIR) $(COVERAGE_DIR) zig-out .zig-cache
 	rm -f completions/* manpages/*

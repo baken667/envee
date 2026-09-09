@@ -18,6 +18,7 @@
 //! Владение: строки записи ссылаются на память вызывающего либо на арену.
 
 const std = @import("std");
+const perms = @import("../perms.zig");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -160,13 +161,13 @@ pub const Store = struct {
     pub fn deny(s: Store, arena: Allocator, file_path: []const u8) Error!void {
         const path = try s.denyPath(arena, file_path);
         if (std.fs.path.dirname(path)) |dir| {
-            _ = try std.Io.Dir.cwd().createDirPathStatus(s.io, dir, .fromMode(0o700));
+            _ = try std.Io.Dir.cwd().createDirPathStatus(s.io, dir, perms.fromMode(0o700));
         }
         const body = try std.fmt.allocPrint(arena, "{s}\n", .{file_path});
         try std.Io.Dir.cwd().writeFile(s.io, .{
             .sub_path = path,
             .data = body,
-            .flags = .{ .permissions = .fromMode(0o600) },
+            .flags = .{ .permissions = perms.fromMode(0o600) },
         });
     }
 
@@ -226,7 +227,7 @@ pub const Store = struct {
         const cwd = std.Io.Dir.cwd();
         // Права 0700: хранилище решает, какому коду позволено попасть в
         // окружение пользователя.
-        _ = try cwd.createDirPathStatus(s.io, s.root, .fromMode(0o700));
+        _ = try cwd.createDirPathStatus(s.io, s.root, perms.fromMode(0o700));
 
         var body: Writer.Allocating = .init(arena);
         // Writer здесь свой и пишет в память: единственная настоящая причина
@@ -241,7 +242,7 @@ pub const Store = struct {
         try cwd.writeFile(s.io, .{
             .sub_path = tmp_path,
             .data = body.written(),
-            .flags = .{ .permissions = .fromMode(0o600) },
+            .flags = .{ .permissions = perms.fromMode(0o600) },
         });
         errdefer cwd.deleteFile(s.io, tmp_path) catch {};
 
@@ -562,7 +563,7 @@ test "a version 1 entry is treated as unknown" {
     const ts = try TempStore.create(a, base_now);
     defer ts.destroy();
 
-    _ = try std.Io.Dir.cwd().createDirPathStatus(test_io, ts.root, .fromMode(0o700));
+    _ = try std.Io.Dir.cwd().createDirPathStatus(test_io, ts.root, perms.fromMode(0o700));
     const path = try std.fs.path.join(a, &.{ ts.root, "legacy.json" });
     try std.Io.Dir.cwd().writeFile(test_io, .{
         .sub_path = path,
@@ -717,7 +718,7 @@ test "the Go zero time means no expiry" {
     const ts = try TempStore.create(a, base_now);
     defer ts.destroy();
 
-    _ = try std.Io.Dir.cwd().createDirPathStatus(test_io, ts.root, .fromMode(0o700));
+    _ = try std.Io.Dir.cwd().createDirPathStatus(test_io, ts.root, perms.fromMode(0o700));
     const path = try std.fs.path.join(a, &.{ ts.root, "zero.json" });
     try std.Io.Dir.cwd().writeFile(test_io, .{
         .sub_path = path,
