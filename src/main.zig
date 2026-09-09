@@ -10,6 +10,7 @@ const Io = std.Io;
 
 const args_mod = @import("cli/args.zig");
 const cli = @import("cli/root.zig");
+const cli_context = @import("cli/context.zig");
 const env_mod = @import("env.zig");
 const errs = @import("errs.zig");
 const paths_mod = @import("paths.zig");
@@ -78,7 +79,7 @@ fn dispatch(
 
     cli.configureLogging(parsed, err_out);
 
-    var ctx: cli.Ctx = .{
+    var ctx: cli_context.Ctx = .{
         .arena = arena,
         .io = io,
         .environ = init.environ_map,
@@ -86,10 +87,11 @@ fn dispatch(
         .paths = try paths_mod.Paths.init(arena, init.environ_map),
         .stdout = out,
         .stderr = err_out,
+        .cwd = try std.process.currentPathAlloc(io, arena),
         .self_path = try std.process.executablePathAlloc(io, arena),
         // Настоящее хранилище доверия появится на шаге 17; пока ни один
         // конфиг не одобрен, и eval честно об этом сообщает.
-        .trust = cli.TrustGate.denyAll(),
+        .trust = cli_context.TrustGate.denyAll(),
     };
 
     try cli.run(&ctx, parsed);
@@ -117,5 +119,8 @@ test {
     _ = @import("directive.zig");
     _ = @import("directive/file.zig");
     _ = @import("cli/args.zig");
+    _ = @import("cli/context.zig");
     _ = @import("cli/root.zig");
+    _ = @import("cli/resolve.zig");
+    _ = @import("cli/check.zig");
 }
