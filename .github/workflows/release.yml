@@ -52,6 +52,27 @@ jobs:
             *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
           esac
 
+      - name: The tag must be on the branch it releases from
+        # Three releases in a row were cut from a tag placed on a branch head
+        # whose pull request had not been merged yet, publishing the previous
+        # implementation under a new number. A stable tag must be reachable
+        # from main and a pre-release tag from staging, or nothing is built.
+        # (This guards the workflow at the tagged commit; a tag on a commit
+        # that predates this check runs whatever workflow that commit had.)
+        run: |
+          case "${{ steps.meta.outputs.prerelease }}" in
+            true) branch=staging ;;
+            *)    branch=main ;;
+          esac
+          git fetch --no-tags --depth=200 origin "$branch"
+          tag_sha="$(git rev-parse "${GITHUB_REF_NAME}^{commit}")"
+          if git merge-base --is-ancestor "$tag_sha" "origin/$branch"; then
+            echo "$GITHUB_REF_NAME ($tag_sha) is on origin/$branch"
+          else
+            echo "::error::$GITHUB_REF_NAME points at $tag_sha, which is not reachable from origin/$branch. Merge first, then tag the merged head. Refusing to publish."
+            exit 1
+          fi
+
       - name: Build every target
         run: |
           zig build release \

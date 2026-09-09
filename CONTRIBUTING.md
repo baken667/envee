@@ -105,9 +105,16 @@ formula to the tap. Pre-release tags (`-rc.N`, `-beta.N`, `-alpha.N`) go to
 [`baken667/homebrew-tap-staging`](https://github.com/baken667/homebrew-tap-staging)
 and are marked as pre-releases; stable tags go to the production tap.
 
+Cut tags with `make tag`, never by hand. It tags the head of the right
+branch only when no pull request into that branch is still open, and the
+release workflow refuses a tag that is not reachable from that branch. Both
+exist because v0.4.0 and v0.4.1 were tagged on a pre-merge head and published
+the previous implementation under a new number.
+
 ```bash
-git tag -a v0.4.0-rc.1 -m "..." && git push origin v0.4.0-rc.1
+make tag V=0.4.3-rc.1                     # from staging, after the PR is merged
 brew install baken667/tap-staging/envee   # exercise it for real
+make tag V=0.4.3                          # from main, after staging is promoted
 ```
 
 The formula template lives in `packaging/homebrew/envee.rb.tmpl`; the
