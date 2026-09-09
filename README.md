@@ -222,7 +222,7 @@ language that can read stdin and print JSON.
 ## Project status
 
 **Pre-1.0.** The three planned milestones (eval, trust, plugins) are
-implemented. 0.4.0 is the first release of the Zig implementation; upgrading
+implemented. 0.4.2 is the first release of the Zig implementation; upgrading
 from 0.3.x requires one `envee trust` per project, because the content hash
 is computed differently (see [ADR-0020](docs/adr/0020-canonical-hash-v2.md)).
 

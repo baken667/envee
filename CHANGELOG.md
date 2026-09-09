@@ -9,7 +9,13 @@ the curated view.
 
 ## [Unreleased]
 
-## [0.4.0] — Rewritten in Zig
+## [0.4.2] — Rewritten in Zig
+
+Version note: the `v0.4.0` and `v0.4.1` tags were published by mistake from
+the pre-rewrite branch, so the archives and Homebrew formulae behind them were
+the 0.3.0 Go binaries under a new number. Both releases were retracted within
+the hour and the tap formula reverted; a tag is never reused, so the Zig
+release is 0.4.2. If `envee --version` says 0.4.0 or 0.4.1, reinstall.
 
 envee is now a Zig program. The Go implementation served as the behavioural
 reference throughout the rewrite — every command's output was diffed against
