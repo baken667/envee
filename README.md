@@ -57,8 +57,8 @@ tar -xzf envee_*_linux_amd64.tar.gz && sudo install envee envee-plugin-env /usr/
 zig build -Doptimize=ReleaseSafe && sudo install zig-out/bin/envee zig-out/bin/envee-plugin-env /usr/local/bin/
 ```
 
-The archive contains two binaries: `envee` and `envee-plugin-env`, the local
-secret store plugin. Both must be on `$PATH`.
+The archive contains `envee` and the bundled plugins (`envee-plugin-env`,
+`envee-plugin-infisical`). All of them must be on `$PATH`.
 
 ### Wire up your shell
 
@@ -199,10 +199,35 @@ Shipped:
 | Plugin | Source |
 |---|---|
 | `envee-plugin-env` | Local key-value store (`envee secret set KEY=VAL`) |
+| `envee-plugin-infisical` | [Infisical](https://infisical.com) through the `infisical` CLI (see below) |
 | `envee-plugin-op` | (Phase 3) 1Password CLI |
 | `envee-plugin-aws` | (Phase 3) AWS Secrets Manager / SSO |
 | `envee-plugin-vault` | (Phase 3) HashiCorp Vault |
 | `envee-plugin-sops` | (Phase 3) Mozilla SOPS |
+
+### Infisical
+
+`envee-plugin-infisical` ships with envee and delegates to the official
+[`infisical` CLI](https://infisical.com/docs/cli/overview), so login, machine
+identities, self-hosted instances and `.infisical.json` all work exactly as
+they do for the CLI. Install it (`brew install infisical/get-cli/infisical`),
+run `infisical login` (or set `INFISICAL_TOKEN` in CI), and `infisical init`
+in the project once.
+
+```toml
+[env]
+# ref = "[env:][/folder/]NAME"
+DB_PASSWORD  = { source = "infisical", ref = "DB_PASSWORD", redact = true, required = true }
+STRIPE_KEY   = { source = "infisical", ref = "prod:/payments/STRIPE_KEY", redact = true }
+```
+
+Which Infisical environment is used, in order: the `env:` prefix in the ref,
+then `$INFISICAL_ENV`, then the active envee profile (`profile = "dev"` in
+`envee.toml` selects Infisical's `dev`), then the CLI's default from
+`.infisical.json`. `$INFISICAL_PROJECT_ID` selects the project explicitly; the
+CLI runs in the directory of your `envee.toml`, where `.infisical.json`
+normally lives. Failures carry the CLI's own message (`not_found`,
+`unauthenticated`, `no_project`, `not_installed`, `timeout`).
 
 Write your own plugin in 30 lines using [`pkg/sdk-go`](pkg/sdk-go/) — the Go
 SDK is a separate module (`github.com/baken667/envee/pkg/sdk-go`) and works

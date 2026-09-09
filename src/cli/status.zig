@@ -139,7 +139,11 @@ pub fn runStatus(ctx: *Ctx, parsed: args_mod.Parsed, stop_at: []const u8) Error!
 
     var result: ?directive.Result = null;
     if (cfg) |c| if (untrusted.len == 0) {
-        var dispatcher = try plugin.dispatcherFor(arena, ctx.io, ctx.environ, c);
+        var dispatcher = try plugin.dispatcherFor(arena, ctx.io, ctx.environ, c, .{
+            .config_root = config_root,
+            .cwd = ctx.cwd,
+            .profile = profile,
+        });
         const resolver: ?directive.PluginResolver = if (dispatcher) |*d| d.resolver() else null;
         result = directive.apply(arena, ctx.io, c, .{
             .config_root = config_root,

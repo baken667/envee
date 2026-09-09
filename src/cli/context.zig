@@ -194,7 +194,11 @@ pub fn resolveEnv(ctx: *Ctx, profile_flag: []const u8, stop_at: []const u8) Erro
 
     // Плагины ищутся только если конфиг объявляет секреты — и только после
     // проверки доверия выше: обнаружение запускает чужие бинари.
-    var dispatcher = try plugin.dispatcherFor(ctx.arena, ctx.io, ctx.environ, loaded.cfg);
+    var dispatcher = try plugin.dispatcherFor(ctx.arena, ctx.io, ctx.environ, loaded.cfg, .{
+        .config_root = loaded.config_root,
+        .cwd = ctx.cwd,
+        .profile = loaded.profile,
+    });
     const resolver: ?directive.PluginResolver = if (dispatcher) |*d| d.resolver() else null;
 
     var diag: directive.Diagnostics = .{};
