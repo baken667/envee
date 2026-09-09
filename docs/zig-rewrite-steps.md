@@ -60,7 +60,7 @@
   - **Ожидаемые расхождения оформлены как утверждения** (`xfail`): если расхождение исчезнет, скрипт упадёт. Их три вида: плагины (шаг 19), порядок `required`, профиль в `resolve`.
   - **Найдено по ходу, у себя:** ошибки применения директив не превращались в диагностику, и пользователь видел голое `Error: RequiredVarMissing` вместо кода, объяснения и подсказки. Исправлено в `context.liftDirectiveError`, покрыто двумя тестами.
   - **Найдено по ходу, в parity-скрипте:** `set -e` обрывал прогон на первом расхождении, и остальные проверки просто не выполнялись.
-- [ ] Шаг 18 — `trust/sign.zig`, `trust/ssh_key.zig`, `trust --sign/--from`
+- [x] Шаг 18 — `trust/sign.zig`, `trust/ssh_key.zig`, `trust --sign/--from`
 - [ ] Шаг 19 — `plugin.zig`, команды `secret *`
 - [ ] Шаг 20 — `envee-plugin-env` на Zig
 - [ ] Шаг 21 — `status`, `exec`, `doctor`, `plugin list/info`, `daemon status`, `completion`, скрытые not-implemented

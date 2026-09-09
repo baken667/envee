@@ -140,5 +140,7 @@ test {
     _ = @import("cli/check.zig");
     _ = @import("trust/store.zig");
     _ = @import("trust/summary.zig");
+    _ = @import("trust/ssh_key.zig");
+    _ = @import("trust/sign.zig");
     _ = @import("cli/trust.zig");
 }

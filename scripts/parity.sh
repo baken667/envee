@@ -289,6 +289,45 @@ for ex in examples/*/; do
   CHECK_DIR="."
 done
 
+# ---- подписи: крест-накрест ------------------------------------------------
+# Подпись, сделанная одной реализацией, обязана проверяться другой. Это
+# единственная проверка того, что подписываемые байты собираются одинаково.
+# Хеши конфигов у реализаций разные, но импорт кладёт запись как есть, так
+# что на проверку подписи это не влияет.
+
+SIGN_DIR="$(mktemp -d)"
+if ssh-keygen -q -t ed25519 -N "" -C "envee-parity" -f "$SIGN_DIR/id_ed25519" >/dev/null 2>&1; then
+  CHECK_DIR="examples/basic"
+
+  # Zig подписывает и экспортирует; Go проверяет и импортирует.
+  ( cd examples/basic && XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" trust --sign --key "$SIGN_DIR/id_ed25519" --export "$SIGN_DIR/zig-signed.json" >/dev/null 2>&1 )
+  if ( cd examples/basic && XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" trust --from "$SIGN_DIR/zig-signed.json" --public-key "$SIGN_DIR/id_ed25519.pub" >/dev/null 2>&1 ); then
+    echo "ok   Go verifies a Zig-signed entry"; pass=$((pass + 1))
+  else
+    echo "FAIL Go verifies a Zig-signed entry"; fail=$((fail + 1))
+  fi
+
+  # Go подписывает и экспортирует; Zig проверяет и импортирует.
+  ( cd examples/basic && XDG_DATA_HOME="$GO_TRUST" "$GO_BIN" trust --sign --key "$SIGN_DIR/id_ed25519" --export "$SIGN_DIR/go-signed.json" >/dev/null 2>&1 )
+  if ( cd examples/basic && XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" trust --from "$SIGN_DIR/go-signed.json" --public-key "$SIGN_DIR/id_ed25519.pub" >/dev/null 2>&1 ); then
+    echo "ok   Zig verifies a Go-signed entry"; pass=$((pass + 1))
+  else
+    echo "FAIL Zig verifies a Go-signed entry"; fail=$((fail + 1))
+  fi
+
+  # А подделку обе отвергают.
+  sed 's/"file_hash": "sha256:/"file_hash": "sha256:0/' "$SIGN_DIR/go-signed.json" > "$SIGN_DIR/forged.json"
+  if ( cd examples/basic && XDG_DATA_HOME="$ZIG_TRUST" "$ZIG_BIN" trust --from "$SIGN_DIR/forged.json" --public-key "$SIGN_DIR/id_ed25519.pub" >/dev/null 2>&1 ); then
+    echo "FAIL Zig rejects a forged entry"; fail=$((fail + 1))
+  else
+    echo "ok   Zig rejects a forged entry"; pass=$((pass + 1))
+  fi
+  CHECK_DIR="."
+else
+  echo "skip signature cross-check (ssh-keygen unavailable)"
+fi
+rm -rf "$SIGN_DIR"
+
 # ---- check -----------------------------------------------------------------
 # check не требует доверия — его для того и запускают, ПЕРЕД одобрением, —
 # поэтому сверяется полностью и побайтно.
@@ -311,7 +350,6 @@ done
 #
 # Шаг 16 закрыт частично: `check` сверяется выше. `resolve --json` и `diff`
 # требуют доверия, поэтому включаются вместе с шагом 17.
-# Шаг 18: подпись, сделанная одной реализацией, проверяется другой.
 
 echo
 echo "$pass passed, $fail failed"
