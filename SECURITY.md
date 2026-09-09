@@ -25,7 +25,7 @@ That gives three properties worth attacking:
    hook feeds to `eval`. No value from `envee.toml`, from a `.env` loaded via
    `_.file`, or from a secret plugin may escape its quoting and become a
    command. Escaping is round-tripped through real bash, zsh and fish in
-   `internal/shell`.
+   `src/shell/escape.zig`.
 
 2. **Nothing is applied without approval.** Every config file that
    contributes to the resolved environment must be trusted — including
