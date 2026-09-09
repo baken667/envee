@@ -858,8 +858,10 @@ test "a plugin built on the Go SDK resolves through the Zig core" {
     defer tmp.destroy();
 
     const bin = try tmp.join(a, "envee-plugin-demo");
+    // SDK — отдельный Go-модуль, поэтому сборка идёт из его каталога.
     const build = std.process.run(a, io, .{
-        .argv = &.{ "go", "build", "-o", bin, "./pkg/sdk-go/testdata/demoplugin" },
+        .argv = &.{ "go", "build", "-o", bin, "./testdata/demoplugin" },
+        .cwd = .{ .path = "pkg/sdk-go" },
     }) catch |err| switch (err) {
         error.FileNotFound => return error.SkipZigTest,
         else => return err,

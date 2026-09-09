@@ -1,19 +1,12 @@
-# Binaries
+# Binaries and release archives
 /bin/
 /dist/
 /envee
-/enveed
 /envee-*
 
-# Test artifacts
+# Test artifacts (pkg/sdk-go)
 *.test
 *.out
-coverage.*
-*.coverprofile
-# NOT a bare *.html: that silently swallowed site/index.html, so the landing
-# page was never committed and Pages served a 404 while every check passed.
-# `coverage.*` above already covers `go tool cover -html` output.
-/coverage/
 
 # Editor / IDE
 .idea/
@@ -36,19 +29,6 @@ envee.local.*.toml
 
 # Research / planning artifacts (cloned sources we analyzed)
 _research/
-
-# Go
-vendor/
-glide.iml
-
-# Generated docs (produced by ./cmd/gen-docs, emitted at release time by a
-# goreleaser before-hook -- not committed).
-/completions/
-/manpages/
-
-# Goreleaser
-.goreleaser.yml.local
-Untitled
 
 # Zig
 /zig-out/
