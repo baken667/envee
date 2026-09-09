@@ -9,6 +9,7 @@
 //! Владение: всё выделяется из арены вызывающего.
 
 const std = @import("std");
+const perms = @import("perms.zig");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -473,12 +474,12 @@ const PluginDir = struct {
 
         for ([_][]const u8{ "fake", "alpha", "beta" }) |alias| {
             const dst = try tmp.join(arena, try exeName(arena, alias));
-            try Io.Dir.cwd().writeFile(io, .{ .sub_path = dst, .data = bin, .flags = .{ .permissions = .fromMode(0o755) } });
+            try Io.Dir.cwd().writeFile(io, .{ .sub_path = dst, .data = bin, .flags = .{ .permissions = perms.fromMode(0o755) } });
         }
         // Неисполняемый файл и посторонний бинарь обнаружение обязано
         // пропустить.
-        try Io.Dir.cwd().writeFile(io, .{ .sub_path = try tmp.join(arena, "envee-plugin-notexec"), .data = "#!/bin/sh\n", .flags = .{ .permissions = .fromMode(0o644) } });
-        try Io.Dir.cwd().writeFile(io, .{ .sub_path = try tmp.join(arena, "unrelated-binary"), .data = bin, .flags = .{ .permissions = .fromMode(0o755) } });
+        try Io.Dir.cwd().writeFile(io, .{ .sub_path = try tmp.join(arena, "envee-plugin-notexec"), .data = "#!/bin/sh\n", .flags = .{ .permissions = perms.fromMode(0o644) } });
+        try Io.Dir.cwd().writeFile(io, .{ .sub_path = try tmp.join(arena, "unrelated-binary"), .data = bin, .flags = .{ .permissions = perms.fromMode(0o755) } });
 
         // PATH указывает ТОЛЬКО на этот каталог: настоящие плагины
         // разработчика не должны влиять на результат.

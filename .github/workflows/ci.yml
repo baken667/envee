@@ -276,6 +276,110 @@ jobs:
           name: envee-binaries
           path: bin/
 
+  # ---- Zig implementation ---------------------------------------------------
+  # The Zig rewrite (docs/zig-rewrite.md) lives next to the Go code until it
+  # replaces it. Same shape as the Go jobs: a test matrix, a cross-compile
+  # job, and a parity run that diffs the two implementations' output.
+
+  zig-test:
+    name: Zig test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install fish, zsh and nushell (Linux)
+        # The hook tests run the generated hooks in real shells and skip when
+        # a shell is missing; a skipped test looks like a passing one, so at
+        # least one platform must have every shell installed.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh
+          version=0.115.1
+          curl -sSfL -o /tmp/nu.tar.gz \
+            "https://github.com/nushell/nushell/releases/download/${version}/nu-${version}-x86_64-unknown-linux-gnu.tar.gz"
+          tar -xzf /tmp/nu.tar.gz -C /tmp
+          sudo install "/tmp/nu-${version}-x86_64-unknown-linux-gnu/nu" /usr/local/bin/nu
+          for sh in bash zsh fish nu pwsh; do
+            command -v "$sh" >/dev/null || { echo "$sh is not installed; the hook tests would silently skip"; exit 1; }
+          done
+
+      - name: zig fmt
+        run: zig fmt --check src build.zig
+
+      - name: Build
+        run: zig build -Dversion=ci
+
+      - name: Test
+        # Windows is build-only for now: the test suite drives POSIX shells
+        # and file modes. Cross-compilation for windows is covered below.
+        if: runner.os != 'Windows'
+        run: zig build test --summary all
+
+      - name: Smoke
+        if: runner.os != 'Windows'
+        run: |
+          ./zig-out/bin/envee version | grep -q "ci" || (echo "build options did not reach the binary"; exit 1)
+          ./zig-out/bin/envee --help >/dev/null
+          ./zig-out/bin/envee check examples/basic/envee.toml
+          ./zig-out/bin/envee-plugin-env metadata | grep -q '"name":"env"'
+
+  zig-release:
+    name: Zig release build (all targets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Cross-compile every release target
+        # Mirrors the goreleaser matrix: linux/macOS on amd64+arm64, windows
+        # amd64. A target missing here is a target missing from the release.
+        run: zig build release -Dversion=ci -Dcommit=${GITHUB_SHA::7}
+
+      - name: List
+        run: find zig-out/release -type f | sort
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: envee-zig-release
+          path: zig-out/release/
+
+  parity:
+    name: Go/Zig parity
+    # The Go binary is the behavioural reference while the rewrite is in
+    # progress. scripts/parity.sh builds both with the same version metadata
+    # and diffs their output command by command; expected divergences are
+    # asserted as such, so a Go bug fixed in Zig cannot quietly reappear.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git describe for the shared version string
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Run parity
+        run: ./scripts/parity.sh
+
   # ---- GoReleaser dry-run --------------------------------------------------
 
   goreleaser-check:

@@ -12,6 +12,7 @@
 //! `paths.zig`: так делает Go-плагин, и менять это можно только вместе с ним.
 
 const std = @import("std");
+const perms = @import("perms.zig");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const Writer = Io.Writer;
@@ -87,7 +88,7 @@ pub fn render(arena: Allocator, secrets: Secrets) Allocator.Error![]const u8 {
 pub fn save(arena: Allocator, io: Io, file_path: []const u8, secrets: Secrets) SaveError!void {
     const dir = std.fs.path.dirname(file_path) orelse ".";
     const cwd = Io.Dir.cwd();
-    _ = cwd.createDirPathStatus(io, dir, .fromMode(0o700)) catch return error.WriteFailed;
+    _ = cwd.createDirPathStatus(io, dir, perms.fromMode(0o700)) catch return error.WriteFailed;
 
     const body = try render(arena, secrets);
     var random_bytes: [8]u8 = undefined;
@@ -96,7 +97,7 @@ pub fn save(arena: Allocator, io: Io, file_path: []const u8, secrets: Secrets) S
     cwd.writeFile(io, .{
         .sub_path = tmp_path,
         .data = body,
-        .flags = .{ .permissions = .fromMode(0o600) },
+        .flags = .{ .permissions = perms.fromMode(0o600) },
     }) catch return error.WriteFailed;
     errdefer cwd.deleteFile(io, tmp_path) catch {};
     cwd.rename(tmp_path, cwd, file_path, io) catch return error.WriteFailed;
