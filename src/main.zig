@@ -39,6 +39,7 @@ test {
     _ = @import("resolver.zig");
     _ = @import("directive.zig");
     _ = @import("directive/file.zig");
+    _ = @import("cli/args.zig");
     _ = @import("shell/escape.zig");
     _ = @import("shell/shell.zig");
     _ = @import("shell/hook_test.zig");
