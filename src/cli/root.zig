@@ -26,6 +26,10 @@ const log = @import("../log.zig");
 const resolve_cmd = @import("resolve.zig");
 const trust_cmd = @import("trust.zig");
 const secret_cmd = @import("secret.zig");
+const status_cmd = @import("status.zig");
+const plugin_cmd = @import("plugin_cmd.zig");
+const exec_cmd = @import("exec.zig");
+const completion_cmd = @import("completion.zig");
 const shell = @import("../shell/shell.zig");
 
 pub const build_options = @import("build_options");
@@ -93,9 +97,18 @@ pub const root: args_mod.Command = .{
         .{
             .name = "daemon",
             .short = "Manage the enveed background daemon",
+            .long =
+            \\The enveed daemon watches envee.toml files for changes and serves
+            \\eval requests over a UNIX socket, reducing shell-hook latency to < 1ms.
+            \\
+            \\The daemon is optional — envee falls back to standalone mode when the
+            \\daemon is not running.
+            ,
             .subcommands = &.{
-                .{ .name = "status", .short = "Check whether enveed is running" },
-                .{ .name = "start", .short = "Start the daemon", .hidden = true },
+                .{ .name = "status", .short = "Check if the daemon is running", .flags = &.{
+                    .{ .long = "json", .help = "machine-readable JSON output" },
+                } },
+                .{ .name = "start", .short = "Start the daemon in the background", .hidden = true },
                 .{ .name = "stop", .short = "Stop the daemon", .hidden = true },
             },
         },
@@ -113,7 +126,22 @@ pub const root: args_mod.Command = .{
                 .{ .long = "json", .help = "JSON output" },
             },
         },
-        .{ .name = "doctor", .short = "Run health diagnostics" },
+        .{
+            .name = "doctor",
+            .short = "Run health diagnostics",
+            .long =
+            \\Check that envee is correctly installed and configured:
+            \\  - Binary location and version
+            \\  - Shell hook installed in shell config
+            \\  - Trust store integrity
+            \\  - Plugin discovery
+            \\  - Daemon status
+            ,
+            .flags = &.{
+                .{ .long = "fix", .help = "auto-fix safe issues (not implemented)" },
+                .{ .long = "json", .help = "machine-readable JSON output" },
+            },
+        },
         .{
             .name = "eval",
             .usage_args = "<shell>",
@@ -157,10 +185,20 @@ pub const root: args_mod.Command = .{
         .{
             .name = "plugin",
             .short = "Manage plugins",
+            .long =
+            \\Inspect, install, and test secret/tool provider plugins.
+            \\
+            \\Plugins are external executables named envee-plugin-<name> that communicate
+            \\with envee via JSON over stdin/stdout (see docs/adr/0007-plugin-protocol.md).
+            ,
             .subcommands = &.{
-                .{ .name = "list", .short = "List discovered plugins" },
-                .{ .name = "info", .usage_args = "<name>", .short = "Show plugin metadata", .args = .{ .exact = 1 } },
-                .{ .name = "install", .usage_args = "<name>", .short = "Install a plugin", .args = .{ .exact = 1 }, .hidden = true },
+                .{ .name = "list", .short = "List discovered plugins", .flags = &.{
+                    .{ .long = "json", .help = "machine-readable JSON output" },
+                } },
+                .{ .name = "info", .usage_args = "<name>", .short = "Show plugin metadata", .args = .{ .exact = 1 }, .flags = &.{
+                    .{ .long = "json", .help = "machine-readable JSON output" },
+                } },
+                .{ .name = "install", .usage_args = "<name>", .short = "Install a plugin (via brew or go install)", .args = .{ .exact = 1 }, .hidden = true },
             },
         },
         .{
@@ -187,9 +225,25 @@ pub const root: args_mod.Command = .{
                 .{ .name = "get", .usage_args = "KEY", .short = "Print one secret", .args = .{ .exact = 1 } },
             },
         },
-        .{ .name = "status", .short = "Show current envee state", .flags = &.{
-            .{ .long = "trust", .help = "show trust entries" },
-        } },
+        .{
+            .name = "status",
+            .short = "Show current envee state",
+            .long =
+            \\Display information about the current envee configuration:
+            \\  - Resolved config files (in priority order)
+            \\  - Trust status of each file
+            \\  - Active profile and inheritance chain
+            \\  - Discovered plugins
+            \\  - Daemon status
+            ,
+            .flags = &.{
+                .{ .long = "json", .help = "machine-readable JSON output" },
+                .{ .long = "show-secrets", .help = "reveal redacted values" },
+                .{ .long = "trust", .help = "show trust store contents" },
+                .{ .long = "plugins", .help = "show discovered plugins" },
+                .{ .long = "daemon", .help = "show daemon status" },
+            },
+        },
         .{
             .name = "trust",
             .usage_args = "[path]",
@@ -210,8 +264,29 @@ pub const root: args_mod.Command = .{
         // Объявлено, но не реализовано. Скрыто из справки: обещать команду,
         // которой нет, хуже, чем не показывать её.
         .{ .name = "debug", .short = "Dump internal state", .hidden = true },
-        .{ .name = "telemetry", .short = "Toggle telemetry", .hidden = true },
-        .{ .name = "upgrade", .short = "Upgrade envee in place", .hidden = true },
+        .{
+            .name = "telemetry",
+            .short = "Manage opt-in telemetry (not implemented)",
+            .hidden = true,
+            .subcommands = &.{
+                .{ .name = "status", .short = "Show current telemetry setting" },
+                .{ .name = "enable", .short = "Enable telemetry (opt-in)" },
+                .{ .name = "disable", .short = "Disable telemetry" },
+            },
+        },
+        .{
+            .name = "upgrade",
+            .usage_args = "[path]",
+            .short = "Upgrade envee.toml schema to the current version",
+            .hidden = true,
+            .args = .any,
+            .flags = &.{
+                .{ .long = "from", .kind = .{ .string = "" }, .help = "explicit source version" },
+                .{ .long = "to", .kind = .{ .string = "" }, .help = "explicit target version (default: current)" },
+                .{ .long = "dry-run", .help = "show changes, don't apply" },
+                .{ .long = "backup", .help = "create .backup file before writing" },
+            },
+        },
     },
 };
 
@@ -251,14 +326,48 @@ pub fn runWithStopAt(ctx: *Ctx, parsed: args_mod.Parsed, stop_at: []const u8) Er
     if (std.mem.eql(u8, name, "check")) return check_cmd.runWithStopAt(ctx, parsed, stop_at);
     if (std.mem.eql(u8, name, "trust")) return trust_cmd.runTrust(ctx, parsed, null);
     if (std.mem.eql(u8, name, "deny")) return trust_cmd.runDeny(ctx, parsed);
+    if (std.mem.eql(u8, name, "status") and parsed.path.len == 2) return status_cmd.runStatus(ctx, parsed, stop_at);
+    if (std.mem.eql(u8, name, "doctor")) {
+        if (parsed.boolean("fix")) return notImplemented(ctx, "envee doctor --fix", "Run `envee doctor` and apply the hints it prints.");
+        return status_cmd.runDoctor(ctx, parsed, stop_at);
+    }
+    if (std.mem.eql(u8, name, "exec")) return exec_cmd.run(ctx, parsed, stop_at);
+    if (std.mem.eql(u8, name, "completion")) return completion_cmd.run(ctx, parsed);
     if (parsed.path.len >= 2 and std.mem.eql(u8, parsed.path[1].name, "secret")) return secret_cmd.run(ctx, parsed);
-    return notImplemented(ctx, parsed);
+    if (parsed.path.len >= 2 and std.mem.eql(u8, parsed.path[1].name, "plugin")) {
+        if (std.mem.eql(u8, name, "list")) return plugin_cmd.runList(ctx, parsed);
+        if (std.mem.eql(u8, name, "info")) return plugin_cmd.runInfo(ctx, parsed);
+        return notImplemented(ctx, "envee plugin install", "Install plugins with your package manager, e.g. `go install github.com/baken667/envee/plugins/env@latest`.");
+    }
+    if (parsed.path.len >= 2 and std.mem.eql(u8, parsed.path[1].name, "daemon")) {
+        if (std.mem.eql(u8, name, "status")) return status_cmd.runDaemonStatus(ctx, parsed);
+        if (std.mem.eql(u8, name, "start")) return notImplemented(ctx, "envee daemon start", "Run the daemon directly for now: `enveed &`.");
+        return notImplemented(ctx, "envee daemon stop", "Stop it with your process manager, or `pkill enveed`.");
+    }
+    if (parsed.path.len >= 2 and std.mem.eql(u8, parsed.path[1].name, "telemetry")) {
+        if (std.mem.eql(u8, name, "status")) return ctx.stdout.writeAll("telemetry: off (envee collects no telemetry)\n");
+        if (std.mem.eql(u8, name, "telemetry")) return; // родительская команда без подкоманды — как в cobra, показывается справка выше
+        const what = try std.fmt.allocPrint(ctx.arena, "envee telemetry {s}", .{name});
+        return notImplemented(ctx, what, "envee collects no telemetry; there is nothing to configure.");
+    }
+    if (std.mem.eql(u8, name, "upgrade")) return notImplemented(ctx, "envee upgrade", "Only schema " ++ config.schema_version ++ " exists, so no migration is possible yet.");
+    if (std.mem.eql(u8, name, "debug")) return notImplemented(ctx, "envee debug", "Use `envee status`, `envee resolve` and `envee doctor`, or --log-level=debug.");
+    return notImplemented(ctx, try parsed.commandPath(ctx.arena), "");
 }
 
-fn notImplemented(ctx: *Ctx, parsed: args_mod.Parsed) Error!void {
-    const full = try parsed.commandPath(ctx.arena);
-    try ctx.stderr.print("Error: `{s}` is not implemented yet\n", .{full});
-    return error.VersionIncompatible;
+/// Команда есть в дереве, но не делает того, о чём просят. Раньше такие
+/// печатали сообщение и выходили с нулём, и скрипты проходили впустую;
+/// команда, не сделавшая работу, обязана упасть — E014, как в Go.
+fn notImplemented(ctx: *Ctx, what: []const u8, hint: []const u8) Error!void {
+    const S = struct {
+        var kv: [1]errs.KV = .{.{ .key = "status", .value = "planned" }};
+    };
+    return errs.fail(.{
+        .code = .e014,
+        .summary = try std.fmt.allocPrint(ctx.arena, "{s} is not implemented yet", .{what}),
+        .context = &S.kv,
+        .hint = hint,
+    }, error.VersionIncompatible);
 }
 
 pub fn versionString(gpa: Allocator) Allocator.Error![]const u8 {
@@ -650,5 +759,5 @@ test "unimplemented commands say so instead of pretending" {
     const tmp = try harness.TempDir.create(a);
     defer tmp.destroy();
 
-    try testing.expectError(error.VersionIncompatible, harness.run(a, tmp, &.{"doctor"}, &.{}));
+    try testing.expectError(error.VersionIncompatible, harness.run(a, tmp, &.{"debug"}, &.{}));
 }

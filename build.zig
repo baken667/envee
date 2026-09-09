@@ -71,6 +71,7 @@ pub fn build(b: *std.Build) void {
     const test_options = b.addOptions();
     test_options.addOptionPath("fake_plugin", fake_plugin.getEmittedBin());
     test_options.addOptionPath("env_plugin", env_plugin.getEmittedBin());
+    test_options.addOptionPath("envee_bin", exe.getEmittedBin());
 
     const test_root = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),

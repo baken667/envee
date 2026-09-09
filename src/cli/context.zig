@@ -31,16 +31,31 @@ const shell = @import("../shell/shell.zig");
 pub const TrustGate = struct {
     ctx: *anyopaque,
     checkFn: *const fn (ctx: *anyopaque, sources: []const config.SourceFile) errs.Error!void,
+    /// Какие из источников НЕ одобрены. Для `status` и `doctor`, которым
+    /// нужен список, а не первая ошибка.
+    untrustedFn: *const fn (ctx: *anyopaque, arena: Allocator, sources: []const config.SourceFile) Allocator.Error![]const config.SourceFile,
 
     pub fn check(g: TrustGate, sources: []const config.SourceFile) errs.Error!void {
         return g.checkFn(g.ctx, sources);
+    }
+
+    pub fn untrusted(g: TrustGate, arena: Allocator, sources: []const config.SourceFile) Allocator.Error![]const config.SourceFile {
+        return g.untrustedFn(g.ctx, arena, sources);
     }
 
     /// Пока хранилища нет, ни один конфиг не одобрен. Ровно так ведёт себя и
     /// Go-версия с пустым хранилищем: конфиг применяется только после явного
     /// `envee trust`.
     pub fn denyAll() TrustGate {
-        return .{ .ctx = undefined, .checkFn = denyAllCheck };
+        return .{ .ctx = undefined, .checkFn = denyAllCheck, .untrustedFn = allUntrusted };
+    }
+
+    fn allUntrusted(_: *anyopaque, _: Allocator, sources: []const config.SourceFile) Allocator.Error![]const config.SourceFile {
+        return sources;
+    }
+
+    fn noneUntrusted(_: *anyopaque, _: Allocator, _: []const config.SourceFile) Allocator.Error![]const config.SourceFile {
+        return &.{};
     }
 
     fn denyAllCheck(_: *anyopaque, sources: []const config.SourceFile) errs.Error!void {
@@ -66,7 +81,7 @@ pub const TrustGate = struct {
         const S = struct {
             fn check(_: *anyopaque, _: []const config.SourceFile) errs.Error!void {}
         };
-        return .{ .ctx = undefined, .checkFn = S.check };
+        return .{ .ctx = undefined, .checkFn = S.check, .untrustedFn = noneUntrusted };
     }
 };
 
@@ -87,6 +102,9 @@ pub const Ctx = struct {
     /// Версия, попадающая в записи хранилища доверия.
     tool_version: []const u8 = "",
     trust: TrustGate,
+    /// Код выхода процесса, если команда отработала без ошибки, но хочет
+    /// завершиться не нулём: `exec` пробрасывает код дочернего процесса.
+    exit_code: u8 = 0,
 };
 
 pub const Error = errs.Error || errs.FailError || resolver_mod.Error || directive.Error ||
