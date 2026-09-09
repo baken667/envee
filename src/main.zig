@@ -35,6 +35,7 @@ test {
     _ = @import("toml/value.zig");
     _ = @import("toml/parser.zig");
     _ = @import("config.zig");
+    _ = @import("resolver.zig");
     _ = @import("shell/escape.zig");
     _ = @import("shell/shell.zig");
     _ = @import("shell/hook_test.zig");
