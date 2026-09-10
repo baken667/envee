@@ -9,6 +9,8 @@ the curated view.
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-09-10
+
 ### Added
 
 - **`envee-plugin-infisical`**, bundled with envee. Resolves secrets from
@@ -324,7 +326,9 @@ green, and completions and man pages installed to the right prefixes.
 - `envee trust --sign` (ed25519) is not implemented.
 - The WASM script sandbox (`_.script`) is not implemented.
 
-[Unreleased]: https://github.com/baken667/envee/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/baken667/envee/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/baken667/envee/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/baken667/envee/compare/v0.3.0...v0.4.2
 [0.3.0]: https://github.com/baken667/envee/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/baken667/envee/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/baken667/envee/compare/v0.1.2...v0.2.0
