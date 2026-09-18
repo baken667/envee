@@ -27,6 +27,11 @@ the curated view.
 
 ### Fixed
 
+- **`envee exec` ignored `_.path`.** The command did not get the config's
+  directories on its `PATH`, so `envee exec -- tool` failed for a tool in
+  the project's `./bin` even though the shell hook put it there.
+- **Windows**: `$PATH` was split and joined with `:`, which is part of
+  `C:\`; it now uses `;`.
 - **Windows**: `envee deny` had no effect. The deny list is keyed by the
   config's path, and the path was built with `/` where every other part of
   envee used `\`, so the denied path and the checked path never matched.

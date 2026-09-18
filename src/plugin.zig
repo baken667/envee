@@ -909,7 +909,7 @@ test "a plugin built on the Go SDK resolves through the Zig core" {
     const tmp = try harness.TempDir.create(a);
     defer tmp.destroy();
 
-    const bin = try tmp.join(a, "envee-plugin-demo");
+    const bin = try tmp.join(a, try testExeName(a, "demo"));
     // SDK — отдельный Go-модуль, поэтому сборка идёт из его каталога.
     const build = std.process.run(a, io, .{
         .argv = &.{ "go", "build", "-o", bin, "./testdata/demoplugin" },
