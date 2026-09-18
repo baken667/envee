@@ -133,8 +133,9 @@ jobs:
           "$bin/envee" --version | grep -q "${{ steps.meta.outputs.version }}"
           "$bin/envee" init bash | grep -q _envee_hook
           "$bin/envee" check examples/basic/envee.toml
-          "$bin/envee-plugin-env" metadata | grep -q '"name":"env"'
-          "$bin/envee-plugin-infisical" metadata | grep -q '"name":"infisical"'
+          for p in env infisical op sops; do
+            "$bin/envee-plugin-$p" metadata | grep -q "\"name\":\"$p\""
+          done
 
       - name: Publish the GitHub release
         env:

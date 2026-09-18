@@ -70,7 +70,9 @@ jobs:
         run: |
           ./zig-out/bin/envee version | grep -q "ci" || (echo "build options did not reach the binary"; exit 1)
           ./zig-out/bin/envee --help >/dev/null
-          ./zig-out/bin/envee-plugin-env metadata | grep -q '"name":"env"'
+          for p in env infisical op sops; do
+            ./zig-out/bin/envee-plugin-$p metadata | grep -q "\"name\":\"$p\""
+          done
           for f in examples/*/envee.toml; do ./zig-out/bin/envee check "$f"; done
 
       - name: Untrusted eval must be refused

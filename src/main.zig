@@ -149,6 +149,8 @@ test {
     _ = @import("plugins/env.zig");
     _ = @import("plugins/protocol.zig");
     _ = @import("plugins/infisical.zig");
+    _ = @import("plugins/op.zig");
+    _ = @import("plugins/sops.zig");
     _ = @import("cli/status.zig");
     _ = @import("cli/plugin_cmd.zig");
     _ = @import("cli/exec.zig");

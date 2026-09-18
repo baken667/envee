@@ -25,33 +25,22 @@ const Writer = Io.Writer;
 const Environ = std.process.Environ.Map;
 
 const build_options = @import("build_options");
+const cli = @import("cli.zig");
 const protocol = @import("protocol.zig");
-const core_plugin = @import("../plugin.zig");
 
 pub const name = "infisical";
-pub const cli = "infisical";
-/// Ядро убивает плагин через 10 с; CLI получает меньше, чтобы ответ с
-/// объяснением успел дойти.
-pub const default_timeout_ms: i64 = 8_000;
 pub const Input = protocol.Input;
 
+const tool: cli.Tool = .{
+    .name = name,
+    .cli = "infisical",
+    .install_hint = "the infisical CLI is not on $PATH; install it (brew install infisical/get-cli/infisical) and run `infisical login`",
+    .timeout_env = "ENVEE_INFISICAL_TIMEOUT_MS",
+    .classify = classify,
+};
+
 pub fn run(arena: Allocator, io: Io, in: Input, out: *Writer, err_out: *Writer) Allocator.Error!u8 {
-    if (in.argv.len < 2) {
-        err_out.writeAll("usage: envee-plugin-infisical <metadata|resolve|version>\n") catch {};
-        return 2;
-    }
-    const sub = in.argv[1];
-    if (std.mem.eql(u8, sub, "metadata")) {
-        writeMetadata(out) catch {};
-        return 0;
-    }
-    if (std.mem.eql(u8, sub, "version")) {
-        out.print("envee-plugin-infisical version {s}\n", .{build_options.version}) catch {};
-        return 0;
-    }
-    if (std.mem.eql(u8, sub, "resolve")) return resolve(arena, io, in, out);
-    err_out.print("unknown subcommand: {s}\n", .{sub}) catch {};
-    return 2;
+    return cli.dispatch(arena, io, in, out, err_out, name, writeMetadata, resolve);
 }
 
 fn writeMetadata(out: *Writer) Writer.Error!void {
@@ -120,69 +109,22 @@ fn resolve(arena: Allocator, io: Io, in: Input, out: *Writer) Allocator.Error!u8
     if (env_name.len == 0) env_name = in.environ.get("INFISICAL_ENV") orelse "";
     if (env_name.len == 0) env_name = req.profile;
 
-    // CLI ищется по PATH из окружения запроса, а не процесса: spawn
-    // разрешает argv[0] по окружению родителя, и подменить его (в тестах
-    // или через `env PATH=...`) иначе нельзя.
-    const cli_path = (try core_plugin.lookPath(arena, io, in.environ.get("PATH") orelse "", cli)) orelse {
-        try protocol.writeError(arena, out, req.request_id, "not_installed", "the infisical CLI is not on $PATH; install it (brew install infisical/get-cli/infisical) and run `infisical login`", false);
-        return 1;
-    };
-
-    var argv: std.ArrayList([]const u8) = .empty;
-    try argv.appendSlice(arena, &.{ cli_path, "secrets", "get", ref.secret, "--plain", "--silent" });
-    if (env_name.len > 0) try argv.appendSlice(arena, &.{ "--env", env_name });
-    if (ref.path.len > 0) try argv.appendSlice(arena, &.{ "--path", ref.path });
+    var args: std.ArrayList([]const u8) = .empty;
+    try args.appendSlice(arena, &.{ "secrets", "get", ref.secret, "--plain", "--silent" });
+    if (env_name.len > 0) try args.appendSlice(arena, &.{ "--env", env_name });
+    if (ref.path.len > 0) try args.appendSlice(arena, &.{ "--path", ref.path });
     if (in.environ.get("INFISICAL_PROJECT_ID")) |id| if (id.len > 0) {
-        try argv.appendSlice(arena, &.{ "--projectId", id });
+        try args.appendSlice(arena, &.{ "--projectId", id });
     };
 
     // CLI ищет `.infisical.json` в рабочем каталоге; у envee это каталог
     // конфига, а не тот, откуда пользователь набрал команду.
     const cwd = if (req.config_root.len > 0) req.config_root else req.cwd;
+    const stdout = (try cli.exec(arena, io, in, req, out, tool, args.items, cwd, &.{
+        .{ "INFISICAL_DISABLE_UPDATE_CHECK", "true" },
+    })) orelse return 1;
 
-    var environ = try in.environ.clone(arena);
-    try environ.put("INFISICAL_DISABLE_UPDATE_CHECK", "true");
-    try environ.put("NO_COLOR", "1");
-
-    const timeout_ms: i64 = blk: {
-        const raw = in.environ.get("ENVEE_INFISICAL_TIMEOUT_MS") orelse break :blk default_timeout_ms;
-        break :blk std.fmt.parseInt(i64, raw, 10) catch default_timeout_ms;
-    };
-
-    const result = std.process.run(arena, io, .{
-        .argv = argv.items,
-        .cwd = if (cwd.len > 0) .{ .path = cwd } else .inherit,
-        .environ_map = &environ,
-        .timeout = .{ .duration = .{ .raw = .fromMilliseconds(timeout_ms), .clock = .awake } },
-    }) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.FileNotFound => {
-            try protocol.writeError(arena, out, req.request_id, "not_installed", "the infisical CLI is not on $PATH; install it (brew install infisical/get-cli/infisical) and run `infisical login`", false);
-            return 1;
-        },
-        error.Timeout => {
-            try protocol.writeError(arena, out, req.request_id, "timeout", try std.fmt.allocPrint(arena, "infisical did not answer within {d} ms", .{timeout_ms}), true);
-            return 1;
-        },
-        else => {
-            try protocol.writeError(arena, out, req.request_id, "internal", try std.fmt.allocPrint(arena, "cannot run infisical: {s}", .{@errorName(err)}), true);
-            return 1;
-        },
-    };
-
-    const failed = result.term != .exited or result.term.exited != 0;
-    if (failed) {
-        const detail = firstLine(result.stderr);
-        const code = classify(detail);
-        const message = if (detail.len > 0)
-            try std.fmt.allocPrint(arena, "infisical: {s}", .{detail})
-        else
-            try std.fmt.allocPrint(arena, "infisical exited with {s}", .{termName(arena, result.term)});
-        try protocol.writeError(arena, out, req.request_id, code.name, message, code.recoverable);
-        return 1;
-    }
-
-    const value = std.mem.trimEnd(u8, result.stdout, "\n");
+    const value = std.mem.trimEnd(u8, stdout, "\n");
     if (value.len == 0) {
         try protocol.writeError(arena, out, req.request_id, "not_found", try std.fmt.allocPrint(arena, "infisical returned no value for \"{s}\"{s}{s}", .{ ref.secret, if (env_name.len > 0) " in environment " else "", env_name }), true);
         return 1;
@@ -191,56 +133,30 @@ fn resolve(arena: Allocator, io: Io, in: Input, out: *Writer) Allocator.Error!u8
     return 0;
 }
 
-const Code = struct { name: []const u8, recoverable: bool };
-
-/// Код ошибки по тексту CLI. Точные формулировки CLI не документированы и
-/// меняются, поэтому классификация по ключевым словам, а сам текст всегда
-/// уходит пользователю целиком.
-fn classify(detail: []const u8) Code {
-    var lower_buf: [512]u8 = undefined;
-    const n = @min(detail.len, lower_buf.len);
-    const lower = std.ascii.lowerString(lower_buf[0..n], detail[0..n]);
-    if (contains(lower, "not found") or contains(lower, "does not exist") or contains(lower, "no secret")) return .{ .name = "not_found", .recoverable = true };
-    if (contains(lower, "infisical init") or contains(lower, "--projectid") or contains(lower, "project id")) return .{ .name = "no_project", .recoverable = false };
-    if (contains(lower, "token") or contains(lower, "login") or contains(lower, "unauthorized") or contains(lower, "unauthenticated") or contains(lower, "401") or contains(lower, "forbidden")) return .{ .name = "unauthenticated", .recoverable = false };
+fn classify(detail: []const u8) cli.Code {
+    if (cli.mentions(detail, &.{ "not found", "does not exist", "no secret" })) return .{ .name = "not_found", .recoverable = true };
+    if (cli.mentions(detail, &.{ "infisical init", "--projectid", "project id" })) return .{ .name = "no_project", .recoverable = false };
+    if (cli.mentions(detail, &.{ "token", "login", "unauthorized", "unauthenticated", "401", "forbidden" })) return .{ .name = "unauthenticated", .recoverable = false };
     return .{ .name = "cli_error", .recoverable = true };
-}
-
-fn contains(haystack: []const u8, needle: []const u8) bool {
-    return std.mem.indexOf(u8, haystack, needle) != null;
-}
-
-fn firstLine(s: []const u8) []const u8 {
-    const trimmed = std.mem.trim(u8, s, " \t\r\n");
-    const end = std.mem.indexOfScalar(u8, trimmed, '\n') orelse trimmed.len;
-    return std.mem.trimEnd(u8, trimmed[0..end], " \t\r");
-}
-
-fn termName(arena: Allocator, term: std.process.Child.Term) []const u8 {
-    return switch (term) {
-        .exited => |c| std.fmt.allocPrint(arena, "status {d}", .{c}) catch "status ?",
-        .signal => |s| std.fmt.allocPrint(arena, "signal {d}", .{@intFromEnum(s)}) catch "signal",
-        else => @tagName(term),
-    };
 }
 
 // ---- тесты -------------------------------------------------------------------
 //
-// Настоящий CLI в тестах не участвует: поддельный `infisical` — скрипт в
-// временном каталоге, который записывает свои аргументы и ведёт себя по
-// `FAKE_INFISICAL_MODE`. Так проверяется ровно то, за что отвечает плагин:
-// какую команду он собирает и как переводит ответы.
+// Поддельный `infisical` — см. `cli.Fixture`.
 
 const testing = std.testing;
 const harness = @import("../cli/test_harness.zig");
 const plugin_mod = @import("../plugin.zig");
-const perms = @import("../perms.zig");
+
+fn fixture(a: Allocator, mode: []const u8) !cli.Fixture {
+    return cli.Fixture.create(a, "infisical", fake_script, mode);
+}
 
 const fake_script =
     \\#!/bin/sh
-    \\printf '%s\n' "$@" > "$FAKE_INFISICAL_ARGS"
-    \\printf 'cwd=%s\n' "$PWD" >> "$FAKE_INFISICAL_ARGS"
-    \\case "${FAKE_INFISICAL_MODE:-ok}" in
+    \\printf '%s\n' "$@" > "$FAKE_CLI_ARGS"
+    \\printf 'cwd=%s\n' "$PWD" >> "$FAKE_CLI_ARGS"
+    \\case "${FAKE_CLI_MODE:-ok}" in
     \\  missing)   echo "error: secret with name $3 not found" >&2; exit 1 ;;
     \\  noauth)    echo "error: invalid service token entered. Please double check your service token and try again" >&2; exit 1 ;;
     \\  noproject) echo "Please either run infisical init to connect to a project or pass in project id with --projectId flag" >&2; exit 1 ;;
@@ -251,54 +167,6 @@ const fake_script =
     \\esac
     \\
 ;
-
-const Fixture = struct {
-    tmp: harness.TempDir,
-    environ: Environ,
-    args_file: []const u8,
-
-    fn create(a: Allocator, mode: []const u8) !Fixture {
-        const tmp = try harness.TempDir.create(a);
-        const bin_dir = try tmp.join(a, "bin");
-        try Io.Dir.cwd().createDirPath(testing.io, bin_dir);
-        try Io.Dir.cwd().writeFile(testing.io, .{ .sub_path = try tmp.join(a, "bin/infisical"), .data = fake_script, .flags = .{ .permissions = perms.fromMode(0o755) } });
-        const args_file = try tmp.join(a, "args.txt");
-        var environ: Environ = .init(a);
-        try environ.put("PATH", try std.fmt.allocPrint(a, "{s}:/usr/bin:/bin", .{bin_dir}));
-        try environ.put("HOME", tmp.path);
-        try environ.put("FAKE_INFISICAL_ARGS", args_file);
-        if (mode.len > 0) try environ.put("FAKE_INFISICAL_MODE", mode);
-        return .{ .tmp = tmp, .environ = environ, .args_file = args_file };
-    }
-
-    fn destroy(f: Fixture) void {
-        f.tmp.destroy();
-    }
-
-    fn resolveWith(f: *const Fixture, a: Allocator, ref: []const u8, profile: []const u8) !Run {
-        const body = try std.fmt.allocPrint(a, "{{\"api_version\":1,\"request_id\":\"req-1\",\"spec\":{{\"ref\":\"{s}\"}},\"context\":{{\"config_root\":\"{s}\",\"cwd\":\"{s}\",\"profile\":\"{s}\",\"env\":{{}}}}}}", .{ ref, f.tmp.path, f.tmp.path, profile });
-        var out: Writer.Allocating = .init(a);
-        var err_out: Writer.Allocating = .init(a);
-        const code = try run(a, testing.io, .{ .argv = &.{ "p", "resolve" }, .stdin = body, .environ = &f.environ, .now_ns = 0 }, &out.writer, &err_out.writer);
-        return .{ .code = code, .stdout = out.written() };
-    }
-
-    fn recordedArgs(f: *const Fixture, a: Allocator) ![]const u8 {
-        return Io.Dir.cwd().readFileAlloc(testing.io, f.args_file, a, .unlimited);
-    }
-};
-
-const Run = struct { code: u8, stdout: []const u8 };
-
-fn response(a: Allocator, stdout: []const u8) !std.json.ObjectMap {
-    const v = try std.json.parseFromSliceLeaky(std.json.Value, a, stdout, .{});
-    try testing.expect(v == .object);
-    return v.object;
-}
-
-fn errorCode(o: std.json.ObjectMap) []const u8 {
-    return protocol.stringField(o.get("error").?.object, "code").?;
-}
 
 test "refs: name, environment and folder in every combination" {
     const cases = [_]struct { raw: []const u8, env: []const u8, path: []const u8, secret: []const u8 }{
@@ -341,12 +209,12 @@ test "resolve builds the CLI call from the ref and the envee profile" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const f = try Fixture.create(a, "");
+    const f = try fixture(a, "");
     defer f.destroy();
 
-    const r = try f.resolveWith(a, "/backend/DB_PASSWORD", "prod");
+    const r = try f.resolveWith(a, run, "/backend/DB_PASSWORD", "prod");
     try testing.expectEqual(@as(u8, 0), r.code);
-    const o = try response(a, r.stdout);
+    const o = try cli.response(a, r.stdout);
     try testing.expectEqualStrings("ok", protocol.stringField(o, "status").?);
     try testing.expectEqualStrings("s3cret-value", protocol.stringField(o.get("value").?.object, "value").?);
     try testing.expectEqualStrings("infisical", protocol.stringField(o.get("metadata").?.object, "source").?);
@@ -360,23 +228,23 @@ test "the Infisical environment: ref wins over INFISICAL_ENV, which wins over th
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    var f = try Fixture.create(a, "");
+    var f = try fixture(a, "");
     defer f.destroy();
 
     // Ни ссылки, ни переменной, ни профиля — флаг не передаётся вовсе, и
     // окружение выбирает сам CLI по .infisical.json.
-    _ = try f.resolveWith(a, "TOKEN", "");
+    _ = try f.resolveWith(a, run, "TOKEN", "");
     try testing.expect(std.mem.indexOf(u8, try f.recordedArgs(a), "--env") == null);
 
     try f.environ.put("INFISICAL_ENV", "staging");
-    _ = try f.resolveWith(a, "TOKEN", "dev");
+    _ = try f.resolveWith(a, run, "TOKEN", "dev");
     try testing.expect(std.mem.indexOf(u8, try f.recordedArgs(a), "--env\nstaging\n") != null);
 
-    _ = try f.resolveWith(a, "production:TOKEN", "dev");
+    _ = try f.resolveWith(a, run, "production:TOKEN", "dev");
     try testing.expect(std.mem.indexOf(u8, try f.recordedArgs(a), "--env\nproduction\n") != null);
 
     try f.environ.put("INFISICAL_PROJECT_ID", "proj-123");
-    _ = try f.resolveWith(a, "TOKEN", "");
+    _ = try f.resolveWith(a, run, "TOKEN", "");
     try testing.expect(std.mem.indexOf(u8, try f.recordedArgs(a), "--projectId\nproj-123\n") != null);
 }
 
@@ -393,12 +261,12 @@ test "CLI failures become structured errors with the CLI's own words" {
         .{ .mode = "empty", .code = "not_found", .recoverable = true, .contains = "returned no value for \"NOPE\"" },
     };
     for (cases) |c| {
-        const f = try Fixture.create(a, c.mode);
+        const f = try fixture(a, c.mode);
         defer f.destroy();
-        const r = try f.resolveWith(a, "NOPE", "");
+        const r = try f.resolveWith(a, run, "NOPE", "");
         try testing.expectEqual(@as(u8, 1), r.code);
-        const o = try response(a, r.stdout);
-        try testing.expectEqualStrings(c.code, errorCode(o));
+        const o = try cli.response(a, r.stdout);
+        try testing.expectEqualStrings(c.code, cli.errorCode(o));
         try testing.expectEqual(c.recoverable, o.get("error").?.object.get("recoverable").?.bool);
         try testing.expect(std.mem.indexOf(u8, protocol.stringField(o.get("error").?.object, "message").?, c.contains) != null);
     }
@@ -409,22 +277,22 @@ test "a missing CLI, a hanging CLI and a bad ref are explained" {
     defer arena.deinit();
     const a = arena.allocator();
 
-    var f = try Fixture.create(a, "");
+    var f = try fixture(a, "");
     defer f.destroy();
-    const bad = try f.resolveWith(a, "no spaces allowed", "");
-    try testing.expectEqualStrings("invalid_spec", errorCode(try response(a, bad.stdout)));
+    const bad = try f.resolveWith(a, run, "no spaces allowed", "");
+    try testing.expectEqualStrings("invalid_spec", cli.errorCode(try cli.response(a, bad.stdout)));
 
     try f.environ.put("PATH", "/nonexistent");
-    const gone = try f.resolveWith(a, "TOKEN", "");
-    const go = try response(a, gone.stdout);
-    try testing.expectEqualStrings("not_installed", errorCode(go));
+    const gone = try f.resolveWith(a, run, "TOKEN", "");
+    const go = try cli.response(a, gone.stdout);
+    try testing.expectEqualStrings("not_installed", cli.errorCode(go));
     try testing.expect(std.mem.indexOf(u8, protocol.stringField(go.get("error").?.object, "message").?, "brew install") != null);
 
-    var h = try Fixture.create(a, "hang");
+    var h = try fixture(a, "hang");
     defer h.destroy();
     try h.environ.put("ENVEE_INFISICAL_TIMEOUT_MS", "300");
-    const slow = try h.resolveWith(a, "TOKEN", "");
-    try testing.expectEqualStrings("timeout", errorCode(try response(a, slow.stdout)));
+    const slow = try h.resolveWith(a, run, "TOKEN", "");
+    try testing.expectEqualStrings("timeout", cli.errorCode(try cli.response(a, slow.stdout)));
 }
 
 // Сквозная проверка: собранный плагин в PATH рядом с поддельным CLI,
@@ -433,13 +301,10 @@ test "the built plugin resolves an Infisical secret through the core" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const io = testing.io;
-    const f = try Fixture.create(a, "");
+    const f = try fixture(a, "");
     defer f.destroy();
 
-    const built = @import("test_options").infisical_plugin;
-    const bin = try Io.Dir.cwd().readFileAlloc(io, built, a, .unlimited);
-    try Io.Dir.cwd().writeFile(io, .{ .sub_path = try f.tmp.join(a, "bin/envee-plugin-infisical"), .data = bin, .flags = .{ .permissions = perms.fromMode(0o755) } });
+    try f.installPlugin(a, name, @import("test_options").infisical_plugin);
     try f.tmp.write(a,
         \\schema = "envee/v1"
         \\profile = "prod"
@@ -449,7 +314,7 @@ test "the built plugin resolves an Infisical secret through the core" {
     );
     const pairs = [_][2][]const u8{
         .{ "PATH", f.environ.get("PATH").? },
-        .{ "FAKE_INFISICAL_ARGS", f.args_file },
+        .{ "FAKE_CLI_ARGS", f.args_file },
     };
     const out = try harness.run(a, f.tmp, &.{ "eval", "bash" }, &pairs);
     try testing.expect(std.mem.indexOf(u8, out, "export DB_PASSWORD=s3cret-value;") != null);
