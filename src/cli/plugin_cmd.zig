@@ -188,7 +188,7 @@ fn installFake(a: Allocator, tmp: harness.TempDir, names: []const []const u8) !v
     const io = testing.io;
     const bin = try std.Io.Dir.cwd().readFileAlloc(io, @import("test_options").fake_plugin, a, .unlimited);
     for (names) |n| {
-        const dst = try tmp.join(a, try plugin.exeName(a, n));
+        const dst = try tmp.join(a, try plugin.testExeName(a, n));
         try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = dst, .data = bin, .flags = .{ .permissions = perms.fromMode(0o755) } });
     }
 }

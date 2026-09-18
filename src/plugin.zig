@@ -57,9 +57,22 @@ pub fn pluginName(path: []const u8) ?[]const u8 {
     return base[prefix.len..];
 }
 
-/// Исполняемость файла. Windows не знает бита исполнения и решает по
-/// расширению из %PATHEXT%; там достаточно самого факта, что файл есть.
+/// Расширения, по которым Windows считает файл исполняемым (умолчание
+/// %PATHEXT% без скриптовых хостов). Бита исполнения там нет.
+const windows_exts = [_][]const u8{ ".exe", ".com", ".bat", ".cmd" };
+
+fn hasWindowsExt(name: []const u8) bool {
+    const ext = std.fs.path.extension(name);
+    for (windows_exts) |e| if (std.ascii.eqlIgnoreCase(ext, e)) return true;
+    return false;
+}
+
+/// Исполняемость файла: бит исполнения на POSIX, расширение на Windows.
+/// Раньше на Windows годился любой файл, а `lookPath` искал имя без
+/// `.exe` — и ни один плагин из архива (`envee-plugin-env.exe`) ядро не
+/// находило.
 fn isExecutable(io: Io, dir: Io.Dir, name: []const u8) bool {
+    if (builtin.os.tag == .windows and !hasWindowsExt(name)) return false;
     const st = dir.statFile(io, name, .{}) catch return false;
     if (st.kind == .directory) return false;
     if (comptime Io.File.Permissions.has_executable_bit) {
@@ -88,14 +101,23 @@ pub fn discoverPaths(arena: Allocator, io: Io, path_var: []const u8) Allocator.E
     return found.toOwnedSlice(arena);
 }
 
-/// Первый исполняемый `exe` в PATH — аналог `exec.LookPath`.
+/// Первый исполняемый `exe` в PATH — аналог `exec.LookPath`. На Windows,
+/// как и там, имя без расширения пробуется с каждым из `windows_exts`.
 pub fn lookPath(arena: Allocator, io: Io, path_var: []const u8, exe: []const u8) Allocator.Error!?[]const u8 {
+    var names: std.ArrayList([]const u8) = .empty;
+    if (builtin.os.tag == .windows and !hasWindowsExt(exe)) {
+        for (windows_exts) |e| try names.append(arena, try std.mem.concat(arena, u8, &.{ exe, e }));
+    } else {
+        try names.append(arena, exe);
+    }
     var dirs = std.mem.splitScalar(u8, path_var, std.fs.path.delimiter);
     while (dirs.next()) |dir_path| {
         if (dir_path.len == 0) continue;
         var dir = Io.Dir.cwd().openDir(io, dir_path, .{}) catch continue;
         defer dir.close(io);
-        if (isExecutable(io, dir, exe)) return try gopath.join(arena, &.{ dir_path, exe });
+        for (names.items) |name| {
+            if (isExecutable(io, dir, name)) return try gopath.join(arena, &.{ dir_path, name });
+        }
     }
     return null;
 }
@@ -372,7 +394,13 @@ fn runPlugin(
     const deadline = timeout.toDeadline(io);
     while (reader.fill(256, deadline)) |_| {} else |err| switch (err) {
         error.EndOfStream => {},
-        error.Timeout => return error.PluginTimeout,
+        error.Timeout => {
+            // Убить до того, как отложенный `reader.deinit` отменит чтение:
+            // на Windows отмена ждёт, пока трубу закроет сам процесс, и
+            // зависший плагин держал бы envee до собственного выхода.
+            child.kill(io);
+            return error.PluginTimeout;
+        },
         else => return .{ .ok = false, .term = @errorName(err), .stdout = "" },
     }
     reader.checkAnyError() catch |err| return .{ .ok = false, .term = @errorName(err), .stdout = "" };
@@ -476,6 +504,11 @@ pub fn dispatcherFor(arena: Allocator, io: Io, environ: *const Environ, cfg: con
 const testing = std.testing;
 const harness = @import("cli/test_harness.zig");
 
+/// Имя файла плагина в тестах: на Windows с `.exe`, иначе его не найти.
+pub fn testExeName(arena: Allocator, alias: []const u8) Allocator.Error![]const u8 {
+    return std.mem.concat(arena, u8, &.{ try exeName(arena, alias), comptime builtin.target.exeFileExt() });
+}
+
 const PluginDir = struct {
     tmp: harness.TempDir,
     environ: Environ,
@@ -487,13 +520,13 @@ const PluginDir = struct {
         const bin = try Io.Dir.cwd().readFileAlloc(io, fake_path, arena, .unlimited);
 
         for ([_][]const u8{ "fake", "alpha", "beta" }) |alias| {
-            const dst = try tmp.join(arena, try exeName(arena, alias));
+            const dst = try tmp.join(arena, try testExeName(arena, alias));
             try Io.Dir.cwd().writeFile(io, .{ .sub_path = dst, .data = bin, .flags = .{ .permissions = perms.fromMode(0o755) } });
         }
         // Неисполняемый файл и посторонний бинарь обнаружение обязано
         // пропустить.
         try Io.Dir.cwd().writeFile(io, .{ .sub_path = try tmp.join(arena, "envee-plugin-notexec"), .data = "#!/bin/sh\n", .flags = .{ .permissions = perms.fromMode(0o644) } });
-        try Io.Dir.cwd().writeFile(io, .{ .sub_path = try tmp.join(arena, "unrelated-binary"), .data = bin, .flags = .{ .permissions = perms.fromMode(0o755) } });
+        try Io.Dir.cwd().writeFile(io, .{ .sub_path = try tmp.join(arena, "unrelated-binary" ++ comptime builtin.target.exeFileExt()), .data = bin, .flags = .{ .permissions = perms.fromMode(0o755) } });
 
         // PATH указывает ТОЛЬКО на этот каталог: настоящие плагины
         // разработчика не должны влиять на результат.
