@@ -96,6 +96,10 @@ fn readCount(gpa: Allocator, counter: []const u8) !usize {
 
 /// Запускает скрипт в оболочке. null — оболочки нет на машине.
 fn runScript(gpa: Allocator, shell_bin: []const u8, script: []const u8) !?[]u8 {
+    // POSIX-оболочки на Windows (Git Bash, MSYS) переписывают `\` в argv,
+    // который им передаёт Windows-процесс, так что проверка сравнивала бы
+    // их преобразование, а не наше экранирование.
+    if (@import("builtin").os.tag == .windows) return null;
     const result = std.process.run(gpa, io, .{
         .argv = &.{ shell_bin, "-c", script },
     }) catch |err| switch (err) {

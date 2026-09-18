@@ -180,6 +180,9 @@ pub const Fixture = struct {
 
     /// `script` — тело поддельной CLI с именем `cli`.
     pub fn create(a: Allocator, cli: []const u8, script: []const u8, mode: []const u8) !Fixture {
+        // Поддельная CLI — shell-скрипт, а Windows его не запустит. Разбор
+        // ссылок и метаданные проверяются там без неё.
+        if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
         const tmp = try harness.TempDir.create(a);
         const bin_dir = try tmp.join(a, "bin");
         try Io.Dir.cwd().createDirPath(testing.io, bin_dir);
@@ -221,7 +224,7 @@ pub const Fixture = struct {
     /// Кладёт собранный плагин рядом с поддельной CLI, чтобы ядро нашло его.
     pub fn installPlugin(f: *const Fixture, a: Allocator, name: []const u8, built: []const u8) !void {
         const bin = try Io.Dir.cwd().readFileAlloc(testing.io, built, a, .unlimited);
-        const dst = try f.tmp.join(a, try std.fmt.allocPrint(a, "bin/envee-plugin-{s}", .{name}));
+        const dst = try f.tmp.join(a, try std.fs.path.join(a, &.{ "bin", try core_plugin.testExeName(a, name) }));
         try Io.Dir.cwd().writeFile(testing.io, .{ .sub_path = dst, .data = bin, .flags = .{ .permissions = perms.fromMode(0o755) } });
     }
 };
