@@ -12,6 +12,10 @@ const release_targets = [_][]const u8{
     "x86_64-windows",
 };
 
+/// Плагины, которые поставляются вместе с envee: `envee-plugin-<name>` из
+/// `src/envee_plugin_<name>.zig`.
+const plugin_names = [_][]const u8{ "env", "infisical", "op", "sops" };
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -39,8 +43,7 @@ pub fn build(b: *std.Build) void {
     // Бинари для хоста: `zig build` кладёт их в zig-out/bin.
     const host = addBinaries(b, target, optimize, options, null);
     b.installArtifact(host.envee);
-    b.installArtifact(host.env_plugin);
-    b.installArtifact(host.infisical_plugin);
+    for (host.plugins) |p| b.installArtifact(p);
 
     const run_cmd = b.addRunArtifact(host.envee);
     run_cmd.step.dependOn(b.getInstallStep());
@@ -60,8 +63,9 @@ pub fn build(b: *std.Build) void {
     });
     const test_options = b.addOptions();
     test_options.addOptionPath("fake_plugin", fake_plugin.getEmittedBin());
-    test_options.addOptionPath("env_plugin", host.env_plugin.getEmittedBin());
-    test_options.addOptionPath("infisical_plugin", host.infisical_plugin.getEmittedBin());
+    for (plugin_names, host.plugins) |name, p| {
+        test_options.addOptionPath(b.fmt("{s}_plugin", .{name}), p.getEmittedBin());
+    }
     test_options.addOptionPath("envee_bin", host.envee.getEmittedBin());
 
     const test_root = b.createModule(.{
@@ -86,7 +90,7 @@ pub fn build(b: *std.Build) void {
         const resolved = b.resolveTargetQuery(query);
         const bins = addBinaries(b, resolved, .ReleaseSafe, options, true);
         const dir: std.Build.InstallDir = .{ .custom = b.fmt("release/{s}", .{triple}) };
-        for ([_]*std.Build.Step.Compile{ bins.envee, bins.env_plugin, bins.infisical_plugin }) |artifact| {
+        for ([_]*std.Build.Step.Compile{bins.envee} ++ bins.plugins) |artifact| {
             const install = b.addInstallArtifact(artifact, .{
                 .dest_dir = .{ .override = dir },
                 // Отладочная база Windows в релиз не идёт.
@@ -99,8 +103,7 @@ pub fn build(b: *std.Build) void {
 
 const Binaries = struct {
     envee: *std.Build.Step.Compile,
-    env_plugin: *std.Build.Step.Compile,
-    infisical_plugin: *std.Build.Step.Compile,
+    plugins: [plugin_names.len]*std.Build.Step.Compile,
 };
 
 /// Все бинари для одной цели. Плагины собираются вместе с ядром и
@@ -119,25 +122,17 @@ fn addBinaries(
         .strip = strip,
     });
     root.addOptions("build_options", options);
-    const envee = b.addExecutable(.{ .name = "envee", .root_module = root });
+    var bins: Binaries = .{ .envee = b.addExecutable(.{ .name = "envee", .root_module = root }), .plugins = undefined };
 
-    const plugin_root = b.createModule(.{
-        .root_source_file = b.path("src/envee_plugin_env.zig"),
-        .target = target,
-        .optimize = optimize,
-        .strip = strip,
-    });
-    plugin_root.addOptions("build_options", options);
-    const env_plugin = b.addExecutable(.{ .name = "envee-plugin-env", .root_module = plugin_root });
-
-    const infisical_root = b.createModule(.{
-        .root_source_file = b.path("src/envee_plugin_infisical.zig"),
-        .target = target,
-        .optimize = optimize,
-        .strip = strip,
-    });
-    infisical_root.addOptions("build_options", options);
-    const infisical_plugin = b.addExecutable(.{ .name = "envee-plugin-infisical", .root_module = infisical_root });
-
-    return .{ .envee = envee, .env_plugin = env_plugin, .infisical_plugin = infisical_plugin };
+    for (plugin_names, &bins.plugins) |name, *p| {
+        const plugin_root = b.createModule(.{
+            .root_source_file = b.path(b.fmt("src/envee_plugin_{s}.zig", .{name})),
+            .target = target,
+            .optimize = optimize,
+            .strip = strip,
+        });
+        plugin_root.addOptions("build_options", options);
+        p.* = b.addExecutable(.{ .name = b.fmt("envee-plugin-{s}", .{name}), .root_module = plugin_root });
+    }
+    return bins;
 }

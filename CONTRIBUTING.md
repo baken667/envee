@@ -20,7 +20,7 @@ Worth reading before you start:
 Zig 0.16.0 exactly — `build.zig.zon` pins it and CI installs that version.
 
 ```bash
-zig build                        # ./zig-out/bin/envee and envee-plugin-env
+zig build                        # ./zig-out/bin/envee and the bundled plugins
 zig build test --summary all     # unit tests
 zig fmt --check src build.zig
 zig build release                # every release target into zig-out/release/
@@ -70,8 +70,11 @@ dependency needs a note in the PR describing why.
 could not work out from the code: the reason, the trade-off, the bug it
 prevents. Tests are named as sentences describing the behaviour.
 
-**Windows is experimental.** It must compile (`zig build release` covers it);
-it does not have to pass tests yet. Use `src/perms.zig` for file modes.
+**Windows runs the tests.** CI runs the suite on windows-latest. Build paths
+with `std.fs.path` or `src/path.zig` (never a literal `/`), split `$PATH`
+with `std.fs.path.delimiter`, use `src/perms.zig` for file modes, and name
+test plugins with `plugin.testExeName`. A test that needs a POSIX shell may
+skip on Windows, with a comment saying why.
 
 ## Commits
 

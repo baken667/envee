@@ -14,6 +14,7 @@ const Io = std.Io;
 const args_mod = @import("args.zig");
 const context = @import("context.zig");
 const errs = @import("../errs.zig");
+const perms = @import("../perms.zig");
 const Ctx = context.Ctx;
 
 pub const Error = context.Error;
@@ -165,7 +166,7 @@ test "set, get, list and unset round-trip through the store file" {
     const data = try Io.Dir.cwd().readFileAlloc(testing.io, path, a, .unlimited);
     try testing.expectEqualStrings("{\n  \"API\": \"a=b\",\n  \"DB_PASSWORD\": \"hunter2\"\n}", data);
     const st = try Io.Dir.cwd().statFile(testing.io, path, .{});
-    try testing.expectEqual(@as(u32, 0o600), @as(u32, @intCast(st.permissions.toMode() & 0o777)));
+    if (perms.modeOf(st.permissions)) |m| try testing.expectEqual(@as(u32, 0o600), m);
 
     const unset = try harness.runFull(a, tmp, &.{ "secret", "unset", "API" }, &.{env}, context.TrustGate.allowAll());
     try testing.expectEqualStrings("[envee] unset API\n", unset.stderr);

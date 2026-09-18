@@ -529,17 +529,19 @@ pub fn prependToPath(
     var seen: std.StringArrayHashMapUnmanaged(void) = .empty;
     defer seen.deinit(arena);
 
-    var it = std.mem.splitScalar(u8, current, ':');
+    // Разделитель ОС: на Windows `;`, а `:` там входит в `C:\`.
+    const delim = std.fs.path.delimiter;
+    var it = std.mem.splitScalar(u8, current, delim);
     while (it.next()) |d| try seen.put(arena, d, {});
 
     for (dirs) |d| {
         if (seen.contains(d)) continue;
         try seen.put(arena, d, {});
-        if (out.items.len > 0) try out.append(arena, ':');
+        if (out.items.len > 0) try out.append(arena, delim);
         try out.appendSlice(arena, d);
     }
     if (current.len > 0) {
-        if (out.items.len > 0) try out.append(arena, ':');
+        if (out.items.len > 0) try out.append(arena, delim);
         try out.appendSlice(arena, current);
     }
     return out.toOwnedSlice(arena);
@@ -1064,18 +1066,25 @@ test "prependToPath keeps order and drops duplicates" {
     defer arena.deinit();
     const a = arena.allocator();
 
+    // Разделитель — ОС: `:` здесь, `;` на Windows.
+    const P = struct {
+        fn list(arena_: Allocator, comptime parts: []const []const u8) ![]const u8 {
+            return std.mem.join(arena_, &[_]u8{std.fs.path.delimiter}, parts);
+        }
+    };
+
     try testing.expectEqualStrings(
-        "/a:/b:/usr/bin:/bin",
-        try prependToPath(a, &.{ "/a", "/b" }, "/usr/bin:/bin"),
+        try P.list(a, &.{ "/a", "/b", "/usr/bin", "/bin" }),
+        try prependToPath(a, &.{ "/a", "/b" }, try P.list(a, &.{ "/usr/bin", "/bin" })),
     );
     // Каталог, уже присутствующий в PATH, повторно не добавляется.
     try testing.expectEqualStrings(
-        "/a:/usr/bin:/bin",
-        try prependToPath(a, &.{ "/a", "/usr/bin" }, "/usr/bin:/bin"),
+        try P.list(a, &.{ "/a", "/usr/bin", "/bin" }),
+        try prependToPath(a, &.{ "/a", "/usr/bin" }, try P.list(a, &.{ "/usr/bin", "/bin" })),
     );
     // Дубликаты внутри самого списка тоже схлопываются.
     try testing.expectEqualStrings(
-        "/a:/usr/bin",
+        try P.list(a, &.{ "/a", "/usr/bin" }),
         try prependToPath(a, &.{ "/a", "/a" }, "/usr/bin"),
     );
     try testing.expectEqualStrings("/usr/bin", try prependToPath(a, &.{}, "/usr/bin"));

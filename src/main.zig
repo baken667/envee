@@ -138,6 +138,7 @@ test {
     _ = @import("cli/root.zig");
     _ = @import("cli/resolve.zig");
     _ = @import("cli/check.zig");
+    _ = @import("cli/import.zig");
     _ = @import("trust/store.zig");
     _ = @import("trust/summary.zig");
     _ = @import("trust/ssh_key.zig");
@@ -149,6 +150,8 @@ test {
     _ = @import("plugins/env.zig");
     _ = @import("plugins/protocol.zig");
     _ = @import("plugins/infisical.zig");
+    _ = @import("plugins/op.zig");
+    _ = @import("plugins/sops.zig");
     _ = @import("cli/status.zig");
     _ = @import("cli/plugin_cmd.zig");
     _ = @import("cli/exec.zig");

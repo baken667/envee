@@ -235,7 +235,7 @@ test "every path is absolute and scoped to an envee directory" {
         try testing.expect(std.fs.path.isAbsolute(path));
         // Без подкаталога приложения сокет и lock-файл легли бы в общий
         // runtime-каталог рядом с чужими файлами.
-        try testing.expect(std.mem.indexOf(u8, path, "/envee") != null);
+        try testing.expect(std.mem.indexOf(u8, path, std.fs.path.sep_str ++ "envee") != null);
     }
 }
 
@@ -267,11 +267,12 @@ test "XDG variables win when they are absolute" {
     });
     const p = try Paths.init(a, &environ);
 
-    try testing.expectEqualStrings("/custom/config/envee", p.config);
-    try testing.expectEqualStrings("/custom/data/envee", p.data);
-    try testing.expectEqualStrings("/custom/cache/envee", p.cache);
-    try testing.expectEqualStrings("/custom/run/envee", p.runtime);
-    try testing.expectEqualStrings("/custom/data/envee/trust", p.trust_store);
+    const j = std.fs.path.join;
+    try testing.expectEqualStrings(try j(a, &.{ "/custom/config", "envee" }), p.config);
+    try testing.expectEqualStrings(try j(a, &.{ "/custom/data", "envee" }), p.data);
+    try testing.expectEqualStrings(try j(a, &.{ "/custom/cache", "envee" }), p.cache);
+    try testing.expectEqualStrings(try j(a, &.{ "/custom/run", "envee" }), p.runtime);
+    try testing.expectEqualStrings(try j(a, &.{ "/custom/data", "envee", "trust" }), p.trust_store);
 }
 
 // Относительное значение XDG_* игнорируется и уступает умолчанию. Ровно на
@@ -300,15 +301,18 @@ test "tilde and $HOME are expanded in XDG variables" {
     defer arena.deinit();
     const a = arena.allocator();
 
+    // Домашний каталог на Windows — USERPROFILE, `$HOME` в значении — просто
+    // запись, которую понимают и там.
     var environ = try testEnviron(a, &.{
-        .{ "HOME", "/home/alice" },
+        .{ if (windows) "USERPROFILE" else "HOME", "/home/alice" },
         .{ "XDG_CONFIG_HOME", "~/cfg" },
         .{ "XDG_DATA_HOME", "$HOME/dat" },
     });
     const p = try Paths.init(a, &environ);
 
-    try testing.expectEqualStrings("/home/alice/cfg/envee", p.config);
-    try testing.expectEqualStrings("/home/alice/dat/envee", p.data);
+    const j = std.fs.path.join;
+    try testing.expectEqualStrings(try j(a, &.{ "/home/alice", "/cfg", "envee" }), p.config);
+    try testing.expectEqualStrings(try j(a, &.{ "/home/alice", "/dat", "envee" }), p.data);
 }
 
 // Дефолты обязаны совпасть с adrg/xdg@v0.5.3, иначе при переходе с Go на Zig
@@ -382,5 +386,5 @@ test "ensureDirs creates everything, and does not fail twice" {
     // его каталог не должен быть доступен другим пользователям. В этом тесте
     // XDG_RUNTIME_DIR отделён от data, так что каталог создаётся с нуля.
     const runtime_stat = try std.Io.Dir.cwd().statFile(io, p.runtime, .{});
-    try testing.expectEqual(@as(std.posix.mode_t, 0o700), runtime_stat.permissions.toMode() & 0o777);
+    if (perms.modeOf(runtime_stat.permissions)) |m| try testing.expectEqual(@as(u32, 0o700), m);
 }

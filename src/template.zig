@@ -374,6 +374,8 @@ test "quote filter wraps in single quotes and escapes them" {
 }
 
 test "dirname and basename follow Go's filepath" {
+    // Ожидания — пути POSIX; правила Windows проверены в path.zig.
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     const cases = [_]struct { in: []const u8, dir: []const u8, base: []const u8 }{
         .{ .in = "/a/b/c", .dir = "/a/b", .base = "c" },
         .{ .in = "/a/b/c/", .dir = "/a/b/c", .base = "c" },
@@ -392,6 +394,8 @@ test "dirname and basename follow Go's filepath" {
 }
 
 test "clean matches Go filepath.Clean" {
+    // Ожидания — пути POSIX; правила Windows проверены в path.zig.
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     const cases = [_]struct { in: []const u8, want: []const u8 }{
         .{ .in = "", .want = "." },
         .{ .in = "/", .want = "/" },
@@ -415,6 +419,8 @@ test "clean matches Go filepath.Clean" {
 }
 
 test "abspath leaves an absolute path alone and cleans it" {
+    // Ожидания — пути POSIX; правила Windows проверены в path.zig.
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     try expectRender(.{ .config_root = "/a/b/../c" }, "{{config_root | abspath}}", "/a/c");
 }
 
