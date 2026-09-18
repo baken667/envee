@@ -60,13 +60,9 @@ jobs:
         run: zig build -Dversion=ci
 
       - name: Test
-        # Windows is build-only for now: the test suite drives POSIX shells
-        # and file modes. Cross-compilation for windows is covered below.
-        if: runner.os != 'Windows'
         run: zig build test --summary all
 
       - name: Smoke
-        if: runner.os != 'Windows'
         run: |
           ./zig-out/bin/envee version | grep -q "ci" || (echo "build options did not reach the binary"; exit 1)
           ./zig-out/bin/envee --help >/dev/null
@@ -78,7 +74,6 @@ jobs:
       - name: Untrusted eval must be refused
         # The whole point of the trust model. Exit code 3 is "trust required"
         # per docs/adr/0017-error-ux.md.
-        if: runner.os != 'Windows'
         working-directory: ./examples/basic
         run: |
           set +e
@@ -91,7 +86,6 @@ jobs:
           fi
 
       - name: Trusted eval exports the expected variables
-        if: runner.os != 'Windows'
         working-directory: ./examples/basic
         run: |
           ../../zig-out/bin/envee trust --yes

@@ -14,3 +14,10 @@ pub fn fromMode(comptime mode: u32) Permissions {
     // Каталоги и файлы на Windows различает сама ОС; здесь только атрибуты.
     return .default_file;
 }
+
+/// Режим файла, где он есть. `null` на Windows: там проверять нечего, и
+/// тесты с проверкой режима её просто пропускают.
+pub fn modeOf(p: Permissions) ?u32 {
+    if (comptime !@hasDecl(Permissions, "toMode")) return null;
+    return @intCast(p.toMode() & 0o777);
+}
