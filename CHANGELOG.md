@@ -29,6 +29,31 @@ the curated view.
   files through the `sops` CLI. `ref = "FILE#KEY[.KEY...]"`, the file
   relative to the config directory, where `sops` also finds `.sops.yaml`.
   Keys (age, PGP, cloud KMS) are found by `sops` as usual.
+- **`envee doctor --fix`** applies the safe fixes: appends the `envee init`
+  line to your bash, zsh or fish rc when it is missing, and makes the
+  secrets file (0600) and the trust store (0700) private again. Running it
+  twice changes nothing. `doctor` now also reports those permissions.
+
+### Fixed
+
+- **Windows**: `envee deny` had no effect. The deny list is keyed by the
+  config's path, and the path was built with `/` where every other part of
+  envee used `\`, so the denied path and the checked path never matched.
+  Paths now follow the OS the way Go's `filepath` does, and the deny key is
+  normalized, so `/p/./envee.toml` cannot slip past a denial of
+  `/p/envee.toml` on any OS.
+- **Windows**: bundled plugins were never found. Lookup searched for
+  `envee-plugin-env` without `.exe`; it now tries the executable extensions,
+  as `exec.LookPath` does, and a file without one is not a plugin.
+- **Windows**: a hanging plugin held envee until the plugin exited on its
+  own instead of being killed at the timeout.
+- **Windows**: the secrets file fell back to a path relative to the current
+  directory when `HOME` was unset; it now uses `USERPROFILE`.
+
+### Changed
+
+- The test suite runs on Windows in CI. Windows is still marked
+  experimental: bash, zsh and fish hooks are not tested there.
 
 ## [0.4.3] — 2026-09-10
 
