@@ -21,6 +21,8 @@ const plugin = @import("../plugin.zig");
 const plugin_cmd = @import("plugin_cmd.zig");
 const resolver_mod = @import("../resolver.zig");
 const store_mod = @import("../trust/store.zig");
+const perms = @import("../perms.zig");
+const secret_store = @import("../secret_store.zig");
 const Ctx = context.Ctx;
 
 pub const Error = context.Error;
@@ -390,18 +392,42 @@ fn goarch() []const u8 {
 
 /// Есть ли строка `envee init` в rc-файле оболочки. Лучшее из возможного:
 /// нечитаемый или необычный rc просто считается «не найдено».
+fn rcFiles(shell_base: []const u8) []const []const u8 {
+    if (std.mem.eql(u8, shell_base, "bash")) return &.{ ".bashrc", ".bash_profile", ".profile" };
+    if (std.mem.eql(u8, shell_base, "zsh")) return &.{ ".zshrc", ".zprofile" };
+    if (std.mem.eql(u8, shell_base, "fish")) return &.{".config/fish/config.fish"};
+    return &.{".profile"};
+}
+
+/// Строка, которую `doctor --fix` дописывает в rc. Только для оболочек, у
+/// которых rc однозначен; nu и pwsh подключаются иначе, их --fix не трогает.
+fn hookLine(shell_base: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, shell_base, "bash")) return "eval \"$(envee init bash)\"";
+    if (std.mem.eql(u8, shell_base, "zsh")) return "eval \"$(envee init zsh)\"";
+    if (std.mem.eql(u8, shell_base, "fish")) return "envee init fish | source";
+    return null;
+}
+
+/// Дописывает hook в первый rc-файл оболочки, создавая его при нужде.
+/// Возвращает путь к файлу.
+fn installHook(ctx: *Ctx, home: []const u8, shell_base: []const u8, line: []const u8) ![]const u8 {
+    const file = try std.fs.path.join(ctx.arena, &.{ home, rcFiles(shell_base)[0] });
+    if (std.fs.path.dirname(file)) |dir| try Io.Dir.cwd().createDirPath(ctx.io, dir);
+    const old = Io.Dir.cwd().readFileAlloc(ctx.io, file, ctx.arena, .unlimited) catch |err| switch (err) {
+        error.FileNotFound => "",
+        else => return err,
+    };
+    // Пустая строка отделяет блок от чужого содержимого, но не открывает
+    // новый файл.
+    const sep = if (old.len == 0) "" else if (old[old.len - 1] != '\n') "\n\n" else "\n";
+    const data = try std.fmt.allocPrint(ctx.arena, "{s}{s}# Added by `envee doctor --fix`\n{s}\n", .{ old, sep, line });
+    try Io.Dir.cwd().writeFile(ctx.io, .{ .sub_path = file, .data = data });
+    return file;
+}
+
 fn hookInstalled(ctx: *Ctx, shell_path: []const u8) Allocator.Error!?[]const u8 {
     const home = ctx.environ.get("HOME") orelse return null;
-    const base = std.fs.path.basename(shell_path);
-    const candidates: []const []const u8 = if (std.mem.eql(u8, base, "bash"))
-        &.{ ".bashrc", ".bash_profile", ".profile" }
-    else if (std.mem.eql(u8, base, "zsh"))
-        &.{ ".zshrc", ".zprofile" }
-    else if (std.mem.eql(u8, base, "fish"))
-        &.{".config/fish/config.fish"}
-    else
-        &.{".profile"};
-    for (candidates) |c| {
+    for (rcFiles(std.fs.path.basename(shell_path))) |c| {
         const file = try std.fs.path.join(ctx.arena, &.{ home, c });
         const data = Io.Dir.cwd().readFileAlloc(ctx.io, file, ctx.arena, .unlimited) catch continue;
         if (std.mem.indexOf(u8, data, "envee init") != null) return file;
@@ -409,8 +435,50 @@ fn hookInstalled(ctx: *Ctx, shell_path: []const u8) Allocator.Error!?[]const u8 
     return null;
 }
 
+/// Файл секретов и хранилище доверия не должны читаться другими
+/// пользователями: envee создаёт их с 0600/0700, но их могли скопировать,
+/// распаковать из бэкапа или создать до того, как права стали строгими.
+/// На Windows режимов нет, и проверка молчит.
+fn checkPermissions(ctx: *Ctx, d: *std.ArrayList(Diagnostic), fix: bool) Error!void {
+    const arena = ctx.arena;
+    const Target = struct { path: []const u8, want: u32 };
+    const targets = [_]Target{
+        .{ .path = try secret_store.path(arena, ctx.environ), .want = 0o600 },
+        .{ .path = ctx.paths.trust_store, .want = 0o700 },
+    };
+    var loose: std.ArrayList([]const u8) = .empty;
+    var fixed: std.ArrayList([]const u8) = .empty;
+    for (targets) |t| {
+        const st = Io.Dir.cwd().statFile(ctx.io, t.path, .{}) catch continue;
+        const mode = perms.modeOf(st.permissions) orelse return;
+        if (mode & 0o077 == 0) continue;
+        const shown = try std.fmt.allocPrint(arena, "{s} ({o:0>3})", .{ t.path, mode });
+        if (fix) {
+            const p = if (t.want == 0o600) perms.fromMode(0o600) else perms.fromMode(0o700);
+            if (Io.Dir.cwd().setFilePermissions(ctx.io, t.path, p, .{})) {
+                try fixed.append(arena, shown);
+                continue;
+            } else |_| {}
+        }
+        try loose.append(arena, shown);
+    }
+    if (loose.items.len > 0) {
+        try d.append(arena, .{
+            .name = "permissions",
+            .status = .warn,
+            .detail = try std.fmt.allocPrint(arena, "readable by other users: {s}", .{try joinComma(arena, loose.items)}),
+            .hint = "Run `envee doctor --fix`, or chmod 600 the secrets file and 700 the trust store.",
+        });
+    } else if (fixed.items.len > 0) {
+        try d.append(arena, .{ .name = "permissions", .status = .ok, .detail = try std.fmt.allocPrint(arena, "fixed: {s}", .{try joinComma(arena, fixed.items)}) });
+    } else {
+        try d.append(arena, .{ .name = "permissions", .status = .ok, .detail = "secrets and trust store are private" });
+    }
+}
+
 pub fn runDoctor(ctx: *Ctx, parsed: args_mod.Parsed, stop_at: []const u8) Error!void {
     const arena = ctx.arena;
+    const fix = parsed.boolean("fix");
     var d: std.ArrayList(Diagnostic) = .empty;
 
     try d.append(arena, .{ .name = "binary", .status = .ok, .detail = try std.fmt.allocPrint(arena, "{s} ({s}/{s})", .{ ctx.self_path, goos(), goarch() }) });
@@ -442,14 +510,25 @@ pub fn runDoctor(ctx: *Ctx, parsed: args_mod.Parsed, stop_at: []const u8) Error!
         try d.append(arena, .{ .name = "shell", .status = .warn, .detail = "$SHELL is not set" });
     } else {
         try d.append(arena, .{ .name = "shell", .status = .ok, .detail = shell_name });
+        const base = std.fs.path.basename(shell_name);
+        const line = hookLine(base);
         if (try hookInstalled(ctx, shell_name)) |file| {
             try d.append(arena, .{ .name = "shell hook", .status = .ok, .detail = try std.fmt.allocPrint(arena, "installed in {s}", .{file}) });
+        } else if (fix and line != null and ctx.environ.get("HOME") != null) {
+            if (installHook(ctx, ctx.environ.get("HOME").?, base, line.?)) |file| {
+                try d.append(arena, .{ .name = "shell hook", .status = .ok, .detail = try std.fmt.allocPrint(arena, "fixed: added to {s} (restart the shell)", .{file}) });
+            } else |err| {
+                try d.append(arena, .{ .name = "shell hook", .status = .fail, .detail = try std.fmt.allocPrint(arena, "could not update the shell rc: {s}", .{@errorName(err)}), .hint = try std.fmt.allocPrint(arena, "Add it by hand: {s}", .{line.?}) });
+            }
         } else {
             try d.append(arena, .{
                 .name = "shell hook",
                 .status = .warn,
                 .detail = "no `envee init` line found in your shell rc",
-                .hint = try std.fmt.allocPrint(arena, "Add: eval \"$(envee init {s})\"", .{std.fs.path.basename(shell_name)}),
+                .hint = if (line) |l|
+                    try std.fmt.allocPrint(arena, "Add: {s} — or run `envee doctor --fix`", .{l})
+                else
+                    try std.fmt.allocPrint(arena, "See `envee init {s} --help`.", .{base}),
             });
         }
     }
@@ -466,6 +545,8 @@ pub fn runDoctor(ctx: *Ctx, parsed: args_mod.Parsed, stop_at: []const u8) Error!
             else => try d.append(arena, .{ .name = dir[0], .status = .fail, .detail = try std.fmt.allocPrint(arena, "{s}: {s}", .{ dir[1], @errorName(err) }), .hint = "Check filesystem permissions." }),
         }
     }
+
+    try checkPermissions(ctx, &d, fix);
 
     const store: store_mod.Store = .{
         .root = ctx.paths.trust_store,
@@ -710,13 +791,37 @@ test "doctor reports every check and fails only on failures" {
         if (std.mem.eql(u8, name, "trust entries")) try testing.expectEqualStrings("1", item.object.get("detail").?.string);
     }
     try testing.expect(config_ok);
+}
 
-    // --fix — честно не реализовано: E014.
-    errs.reset();
-    try testing.expectError(error.VersionIncompatible, harness.run(a, tmp, &.{ "doctor", "--fix" }, &.{}));
-    const d = errs.take().?;
-    try testing.expectEqual(errs.Code.e014, d.code);
-    try testing.expectEqualStrings("envee doctor --fix is not implemented yet", d.summary);
+test "doctor --fix adds the missing shell hook once and tightens loose permissions" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const tmp = try harness.TempDir.create(a);
+    defer tmp.destroy();
+    try tmp.writeFile(a, ".config/fish/config.fish", "set -x EDITOR vim");
+    const secrets = try tmp.join(a, "xdg-data/envee/secrets/env.json");
+    try tmp.writeFile(a, "xdg-data/envee/secrets/env.json", "{}");
+    try Io.Dir.cwd().setFilePermissions(testing.io, secrets, perms.fromMode(0o644), .{});
+
+    const env = [_][2][]const u8{ .{ "SHELL", "/usr/bin/fish" }, .{ "PATH", "/usr/bin:/bin" } };
+    const before = try harness.runRealFull(a, tmp, &.{"doctor"}, &env, null);
+    try testing.expect(std.mem.indexOf(u8, before.stdout, "or run `envee doctor --fix`") != null);
+    if (perms.modeOf(perms.fromMode(0o644)) != null) {
+        try testing.expect(std.mem.indexOf(u8, before.stdout, "[warn] permissions    readable by other users: ") != null);
+    }
+
+    const fixed = try harness.runRealFull(a, tmp, &.{ "doctor", "--fix" }, &env, null);
+    try testing.expect(std.mem.indexOf(u8, fixed.stdout, "[ok  ] shell hook     fixed: added to ") != null);
+    const rc = try Io.Dir.cwd().readFileAlloc(testing.io, try tmp.join(a, ".config/fish/config.fish"), a, .unlimited);
+    try testing.expectEqualStrings("set -x EDITOR vim\n\n# Added by `envee doctor --fix`\nenvee init fish | source\n", rc);
+    const st = try Io.Dir.cwd().statFile(testing.io, secrets, .{});
+    if (perms.modeOf(st.permissions)) |m| try testing.expectEqual(@as(u32, 0o600), m);
+
+    // Второй прогон ничего не меняет.
+    const again = try harness.runRealFull(a, tmp, &.{ "doctor", "--fix" }, &env, null);
+    try testing.expect(std.mem.indexOf(u8, again.stdout, "[ok  ] shell hook     installed in ") != null);
+    try testing.expectEqualStrings(rc, try Io.Dir.cwd().readFileAlloc(testing.io, try tmp.join(a, ".config/fish/config.fish"), a, .unlimited));
 }
 
 test "hidden commands fail with E014 instead of pretending" {
