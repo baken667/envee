@@ -11,6 +11,15 @@ the curated view.
 
 ### Added
 
+- **`envee import`** converts a direnv `.envrc` into `envee.toml`. The
+  `.envrc` is parsed, never executed: `export` (with quoting, `$VAR`,
+  `${VAR}`, `$PWD` and `~`), `unset`, `PATH_add`, `path_add PATH`,
+  `export PATH=dir:$PATH`, `dotenv`, `dotenv_if_exists`, `watch_file` and
+  `source_up` are translated. Every other line — command substitution,
+  conditionals, `use nix` — is copied verbatim into a *MANUAL REVIEW* block
+  at the top of the result instead of being dropped. `--stdout` prints
+  instead of writing; an existing `envee.toml` is only replaced with
+  `--force`.
 - **`envee-plugin-op`**, bundled: 1Password through the `op` CLI.
   `ref = "op://vault/item/[section/]field"` (the `op://` prefix is
   optional). Sign-in, `OP_ACCOUNT`, service-account tokens and the desktop

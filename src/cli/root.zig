@@ -29,6 +29,7 @@ const secret_cmd = @import("secret.zig");
 const status_cmd = @import("status.zig");
 const plugin_cmd = @import("plugin_cmd.zig");
 const exec_cmd = @import("exec.zig");
+const import_cmd = @import("import.zig");
 const completion_cmd = @import("completion.zig");
 const shell = @import("../shell/shell.zig");
 
@@ -166,6 +167,24 @@ pub const root: args_mod.Command = .{
             .usage_args = "-- <command> [args...]",
             .short = "Run a command with the loaded env (no shell hook needed)",
             .args = .passthrough,
+        },
+        .{
+            .name = "import",
+            .usage_args = "[.envrc]",
+            .short = "Convert a direnv .envrc into envee.toml",
+            .long =
+            \\Translate a direnv .envrc into an envee.toml next to it. The .envrc is
+            \\parsed, never executed: export, unset, PATH_add, path_add PATH, dotenv,
+            \\dotenv_if_exists, watch_file and source_up are converted, and every other
+            \\line is listed at the top of the result for manual review.
+            \\
+            \\The .envrc itself is left untouched.
+            ,
+            .args = .any,
+            .flags = &.{
+                .{ .long = "stdout", .help = "print the result instead of writing envee.toml" },
+                .{ .long = "force", .help = "overwrite an existing envee.toml" },
+            },
         },
         .{
             .name = "init",
@@ -333,6 +352,7 @@ pub fn runWithStopAt(ctx: *Ctx, parsed: args_mod.Parsed, stop_at: []const u8) Er
     if (std.mem.eql(u8, name, "status") and parsed.path.len == 2) return status_cmd.runStatus(ctx, parsed, stop_at);
     if (std.mem.eql(u8, name, "doctor")) return status_cmd.runDoctor(ctx, parsed, stop_at);
     if (std.mem.eql(u8, name, "exec")) return exec_cmd.run(ctx, parsed, stop_at);
+    if (std.mem.eql(u8, name, "import")) return import_cmd.run(ctx, parsed);
     if (std.mem.eql(u8, name, "completion")) return completion_cmd.run(ctx, parsed);
     if (parsed.path.len >= 2 and std.mem.eql(u8, parsed.path[1].name, "secret")) return secret_cmd.run(ctx, parsed);
     if (parsed.path.len >= 2 and std.mem.eql(u8, parsed.path[1].name, "plugin")) {
