@@ -9,6 +9,18 @@ the curated view.
 
 ## [Unreleased]
 
+### Added
+
+- **`envee-plugin-op`**, bundled: 1Password through the `op` CLI.
+  `ref = "op://vault/item/[section/]field"` (the `op://` prefix is
+  optional). Sign-in, `OP_ACCOUNT`, service-account tokens and the desktop
+  app integration are `op`'s own; the value is passed through byte for byte
+  (`op read --no-newline`).
+- **`envee-plugin-sops`**, bundled: values from SOPS-encrypted YAML/JSON
+  files through the `sops` CLI. `ref = "FILE#KEY[.KEY...]"`, the file
+  relative to the config directory, where `sops` also finds `.sops.yaml`.
+  Keys (age, PGP, cloud KMS) are found by `sops` as usual.
+
 ## [0.4.3] — 2026-09-10
 
 ### Added
