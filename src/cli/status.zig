@@ -802,12 +802,14 @@ test "doctor --fix adds the missing shell hook once and tightens loose permissio
     try tmp.writeFile(a, ".config/fish/config.fish", "set -x EDITOR vim");
     const secrets = try tmp.join(a, "xdg-data/envee/secrets/env.json");
     try tmp.writeFile(a, "xdg-data/envee/secrets/env.json", "{}");
-    try Io.Dir.cwd().setFilePermissions(testing.io, secrets, perms.fromMode(0o644), .{});
+    // На Windows режимов нет (и std там chmod не умеет).
+    const posix = @import("builtin").os.tag != .windows;
+    if (posix) try Io.Dir.cwd().setFilePermissions(testing.io, secrets, perms.fromMode(0o644), .{});
 
     const env = [_][2][]const u8{ .{ "SHELL", "/usr/bin/fish" }, .{ "PATH", "/usr/bin:/bin" } };
     const before = try harness.runRealFull(a, tmp, &.{"doctor"}, &env, null);
     try testing.expect(std.mem.indexOf(u8, before.stdout, "or run `envee doctor --fix`") != null);
-    if (perms.modeOf(perms.fromMode(0o644)) != null) {
+    if (posix) {
         try testing.expect(std.mem.indexOf(u8, before.stdout, "[warn] permissions    readable by other users: ") != null);
     }
 
