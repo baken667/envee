@@ -17,7 +17,7 @@ help: ## Show this help.
 
 # --- Build ---
 
-build: ## Build envee and envee-plugin-env into zig-out/bin (ReleaseSafe).
+build: ## Build envee and the bundled plugins into zig-out/bin (ReleaseSafe).
 	$(ZIG) build -Doptimize=ReleaseSafe $(ZIG_META)
 
 release: ## Cross-compile stripped binaries for every target into zig-out/release/.

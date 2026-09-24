@@ -9,6 +9,59 @@ the curated view.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-18
+
+### Added
+
+- **`envee import`** converts a direnv `.envrc` into `envee.toml`. The
+  `.envrc` is parsed, never executed: `export` (with quoting, `$VAR`,
+  `${VAR}`, `$PWD` and `~`), `unset`, `PATH_add`, `path_add PATH`,
+  `export PATH=dir:$PATH`, `dotenv`, `dotenv_if_exists`, `watch_file` and
+  `source_up` are translated. Every other line — command substitution,
+  conditionals, `use nix` — is copied verbatim into a *MANUAL REVIEW* block
+  at the top of the result instead of being dropped. `--stdout` prints
+  instead of writing; an existing `envee.toml` is only replaced with
+  `--force`.
+- **`envee-plugin-op`**, bundled: 1Password through the `op` CLI.
+  `ref = "op://vault/item/[section/]field"` (the `op://` prefix is
+  optional). Sign-in, `OP_ACCOUNT`, service-account tokens and the desktop
+  app integration are `op`'s own; the value is passed through byte for byte
+  (`op read --no-newline`).
+- **`envee-plugin-sops`**, bundled: values from SOPS-encrypted YAML/JSON
+  files through the `sops` CLI. `ref = "FILE#KEY[.KEY...]"`, the file
+  relative to the config directory, where `sops` also finds `.sops.yaml`.
+  Keys (age, PGP, cloud KMS) are found by `sops` as usual.
+- **`envee doctor --fix`** applies the safe fixes: appends the `envee init`
+  line to your bash, zsh or fish rc when it is missing, and makes the
+  secrets file (0600) and the trust store (0700) private again. Running it
+  twice changes nothing. `doctor` now also reports those permissions.
+
+### Fixed
+
+- **`envee exec` ignored `_.path`.** The command did not get the config's
+  directories on its `PATH`, so `envee exec -- tool` failed for a tool in
+  the project's `./bin` even though the shell hook put it there.
+- **Windows**: `$PATH` was split and joined with `:`, which is part of
+  `C:\`; it now uses `;`.
+- **Windows**: `envee deny` had no effect. The deny list is keyed by the
+  config's path, and the path was built with `/` where every other part of
+  envee used `\`, so the denied path and the checked path never matched.
+  Paths now follow the OS the way Go's `filepath` does, and the deny key is
+  normalized, so `/p/./envee.toml` cannot slip past a denial of
+  `/p/envee.toml` on any OS.
+- **Windows**: bundled plugins were never found. Lookup searched for
+  `envee-plugin-env` without `.exe`; it now tries the executable extensions,
+  as `exec.LookPath` does, and a file without one is not a plugin.
+- **Windows**: a hanging plugin held envee until the plugin exited on its
+  own instead of being killed at the timeout.
+- **Windows**: the secrets file fell back to a path relative to the current
+  directory when `HOME` was unset; it now uses `USERPROFILE`.
+
+### Changed
+
+- The test suite runs on Windows in CI. Windows is still marked
+  experimental: bash, zsh and fish hooks are not tested there.
+
 ## [0.4.3] — 2026-09-10
 
 ### Added
@@ -326,7 +379,8 @@ green, and completions and man pages installed to the right prefixes.
 - `envee trust --sign` (ed25519) is not implemented.
 - The WASM script sandbox (`_.script`) is not implemented.
 
-[Unreleased]: https://github.com/baken667/envee/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/baken667/envee/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/baken667/envee/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/baken667/envee/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/baken667/envee/compare/v0.3.0...v0.4.2
 [0.3.0]: https://github.com/baken667/envee/compare/v0.2.1...v0.3.0

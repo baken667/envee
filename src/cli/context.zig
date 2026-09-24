@@ -390,7 +390,7 @@ pub fn newPathDirs(
     var seen: std.StringArrayHashMapUnmanaged(void) = .empty;
     defer seen.deinit(arena);
 
-    var it = std.mem.splitScalar(u8, current, ':');
+    var it = std.mem.splitScalar(u8, current, std.fs.path.delimiter);
     while (it.next()) |d| try seen.put(arena, d, {});
 
     for (prepend) |d| {

@@ -12,6 +12,9 @@ const args_mod = @import("args.zig");
 const context = @import("context.zig");
 const errs = @import("../errs.zig");
 const plugin = @import("../plugin.zig");
+const directive = @import("../directive.zig");
+const gopath = @import("../path.zig");
+const perms = @import("../perms.zig");
 const Ctx = context.Ctx;
 
 pub const Error = context.Error;
@@ -32,8 +35,14 @@ pub fn run(ctx: *Ctx, parsed: args_mod.Parsed, stop_at: []const u8) Error!void {
     // Окружение ребёнка: окружение процесса, поверх — вычисленное.
     var environ = try ctx.environ.clone(ctx.arena);
     for (r.result.env.entries.items) |e| try environ.put(e.key, e.value);
+    // `_.path` — часть окружения, как и переменные: без него команда из
+    // `./bin` проекта не находилась, хотя в оболочке после hook она есть.
+    if (r.result.path_prepend.len > 0) {
+        const current = environ.get("PATH") orelse "";
+        try environ.put("PATH", try directive.prependToPath(ctx.arena, r.result.path_prepend, current));
+    }
 
-    const bin = try lookup(ctx, child_argv[0]);
+    const bin = try lookup(ctx, child_argv[0], environ.get("PATH") orelse "");
     var argv = try ctx.arena.dupe([]const u8, child_argv);
     argv[0] = bin;
 
@@ -71,11 +80,10 @@ fn spawnFail(bin: []const u8, err: anyerror) Error {
     }, error.PermissionDenied);
 }
 
-/// Как `exec.LookPath`: имя с `/` берётся как есть, остальное ищется в PATH
-/// окружения процесса.
-fn lookup(ctx: *Ctx, name: []const u8) Error![]const u8 {
-    if (std.mem.indexOfScalar(u8, name, '/') != null) return name;
-    const path_var = ctx.environ.get("PATH") orelse "";
+/// Как `exec.LookPath`: имя с разделителем пути берётся как есть, остальное
+/// ищется в PATH, который получит команда.
+fn lookup(ctx: *Ctx, name: []const u8, path_var: []const u8) Error![]const u8 {
+    for (name) |c| if (gopath.isSep(c)) return name;
     if (try plugin.lookPath(ctx.arena, ctx.io, path_var, name)) |found| return found;
 
     const S = struct {
@@ -134,9 +142,13 @@ test "exec runs the command with the resolved env and passes its exit code throu
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
+    // Тест гоняет `sh` из /tmp с PATH=/usr/bin:/bin — это POSIX.
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     const tmp = try outsideTempDir(a);
     defer tmp.destroy();
-    try tmp.write(a, "schema = \"envee/v1\"\n[env]\nGREETING = \"hi {{env.OUTER}}\"\n");
+    try tmp.write(a, "schema = \"envee/v1\"\n[env]\nGREETING = \"hi {{env.OUTER}}\"\n_.path = [\"./bin\"]\n");
+    try std.Io.Dir.cwd().createDirPath(testing.io, try tmp.join(a, "bin"));
+    try std.Io.Dir.cwd().writeFile(testing.io, .{ .sub_path = try tmp.join(a, "bin/project-tool"), .data = "#!/bin/sh\necho tool-ran\n", .flags = .{ .permissions = perms.fromMode(0o755) } });
 
     // Не одобрено — E001, команда не запускается.
     const untrusted = try runEnvee(a, tmp, &.{ "exec", "--", "sh", "-c", "echo $GREETING" });
@@ -147,6 +159,11 @@ test "exec runs the command with the resolved env and passes its exit code throu
     const ok = try runEnvee(a, tmp, &.{ "exec", "--", "sh", "-c", "echo $GREETING; echo $OUTER" });
     try testing.expectEqual(@as(u8, 0), ok.term.exited);
     try testing.expectEqualStrings("hi kept\nkept\n", ok.stdout);
+
+    // Каталог из `_.path` виден команде: её ищут по нему, и он в её PATH.
+    const tool = try runEnvee(a, tmp, &.{ "exec", "--", "project-tool" });
+    try testing.expectEqual(@as(u8, 0), tool.term.exited);
+    try testing.expectEqualStrings("tool-ran\n", tool.stdout);
 
     // Код выхода ребёнка — код выхода envee.
     const failing = try runEnvee(a, tmp, &.{ "exec", "--", "sh", "-c", "exit 7" });

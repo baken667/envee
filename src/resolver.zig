@@ -281,6 +281,8 @@ fn isFsRoot(dir: []const u8) bool {
 const testing = std.testing;
 
 /// Временный каталог с известным абсолютным путём: пути нужны resolver'у.
+const gopath = @import("path.zig");
+
 const TempDir = struct {
     path: []const u8,
 
@@ -302,7 +304,9 @@ const TempDir = struct {
 
     fn write(t: TempDir, gpa: Allocator, sub: []const u8, body: []const u8) ![]const u8 {
         const io = std.testing.io;
-        const full = try std.fs.path.join(gpa, &.{ t.path, sub });
+        // Путь возвращается в том виде, в каком его построит discover, —
+        // с разделителем ОС, иначе на Windows `a/envee.toml` не совпал бы.
+        const full = try gopath.join(gpa, &.{ t.path, sub });
         if (std.fs.path.dirname(full)) |parent| try std.Io.Dir.cwd().createDirPath(io, parent);
         try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = full, .data = body });
         return full;

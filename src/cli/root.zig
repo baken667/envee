@@ -29,6 +29,7 @@ const secret_cmd = @import("secret.zig");
 const status_cmd = @import("status.zig");
 const plugin_cmd = @import("plugin_cmd.zig");
 const exec_cmd = @import("exec.zig");
+const import_cmd = @import("import.zig");
 const completion_cmd = @import("completion.zig");
 const shell = @import("../shell/shell.zig");
 
@@ -136,9 +137,13 @@ pub const root: args_mod.Command = .{
             \\  - Trust store integrity
             \\  - Plugin discovery
             \\  - Daemon status
+            \\  - Secrets file and trust store not readable by other users
+            \\
+            \\With --fix, the safe fixes are applied: the `envee init` line is appended
+            \\to your shell rc (bash, zsh, fish) and loose permissions are tightened.
             ,
             .flags = &.{
-                .{ .long = "fix", .help = "auto-fix safe issues (not implemented)" },
+                .{ .long = "fix", .help = "add a missing shell hook to your rc file and make secrets and the trust store private" },
                 .{ .long = "json", .help = "machine-readable JSON output" },
             },
         },
@@ -162,6 +167,24 @@ pub const root: args_mod.Command = .{
             .usage_args = "-- <command> [args...]",
             .short = "Run a command with the loaded env (no shell hook needed)",
             .args = .passthrough,
+        },
+        .{
+            .name = "import",
+            .usage_args = "[.envrc]",
+            .short = "Convert a direnv .envrc into envee.toml",
+            .long =
+            \\Translate a direnv .envrc into an envee.toml next to it. The .envrc is
+            \\parsed, never executed: export, unset, PATH_add, path_add PATH, dotenv,
+            \\dotenv_if_exists, watch_file and source_up are converted, and every other
+            \\line is listed at the top of the result for manual review.
+            \\
+            \\The .envrc itself is left untouched.
+            ,
+            .args = .any,
+            .flags = &.{
+                .{ .long = "stdout", .help = "print the result instead of writing envee.toml" },
+                .{ .long = "force", .help = "overwrite an existing envee.toml" },
+            },
         },
         .{
             .name = "init",
@@ -327,11 +350,9 @@ pub fn runWithStopAt(ctx: *Ctx, parsed: args_mod.Parsed, stop_at: []const u8) Er
     if (std.mem.eql(u8, name, "trust")) return trust_cmd.runTrust(ctx, parsed, null);
     if (std.mem.eql(u8, name, "deny")) return trust_cmd.runDeny(ctx, parsed);
     if (std.mem.eql(u8, name, "status") and parsed.path.len == 2) return status_cmd.runStatus(ctx, parsed, stop_at);
-    if (std.mem.eql(u8, name, "doctor")) {
-        if (parsed.boolean("fix")) return notImplemented(ctx, "envee doctor --fix", "Run `envee doctor` and apply the hints it prints.");
-        return status_cmd.runDoctor(ctx, parsed, stop_at);
-    }
+    if (std.mem.eql(u8, name, "doctor")) return status_cmd.runDoctor(ctx, parsed, stop_at);
     if (std.mem.eql(u8, name, "exec")) return exec_cmd.run(ctx, parsed, stop_at);
+    if (std.mem.eql(u8, name, "import")) return import_cmd.run(ctx, parsed);
     if (std.mem.eql(u8, name, "completion")) return completion_cmd.run(ctx, parsed);
     if (parsed.path.len >= 2 and std.mem.eql(u8, parsed.path[1].name, "secret")) return secret_cmd.run(ctx, parsed);
     if (parsed.path.len >= 2 and std.mem.eql(u8, parsed.path[1].name, "plugin")) {
@@ -552,6 +573,10 @@ test "eval does not duplicate the existing PATH" {
     const a = arena.allocator();
     const tmp = try harness.TempDir.create(a);
     defer tmp.destroy();
+    // Сверка идёт по тексту для bash, где `\` в двойных кавычках удвоен, так
+    // что путь Windows-каталога в нём дословно не найти. Сама логика —
+    // общая для всех ОС и проверена здесь на POSIX.
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     try tmp.write(a, "[env]\n_.path = [\"./bin\", \"./tools\"]\n");
 
     const out = try harness.run(a, tmp, &.{ "eval", "bash" }, &.{.{ "PATH", "/usr/bin:/bin" }});
@@ -573,7 +598,7 @@ test "eval skips a path entry already present" {
     try tmp.write(a, "[env]\n_.path = [\"./bin\"]\n");
 
     const bin = try gopath.join(a, &.{ tmp.path, "bin" });
-    const already = try std.fmt.allocPrint(a, "{s}:/usr/bin", .{bin});
+    const already = try std.fmt.allocPrint(a, "{s}{c}/usr/bin", .{ bin, std.fs.path.delimiter });
     const out = try harness.run(a, tmp, &.{ "eval", "bash" }, &.{.{ "PATH", already }});
     try testing.expect(std.mem.indexOf(u8, out, "export PATH=") == null);
 }

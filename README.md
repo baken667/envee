@@ -24,12 +24,13 @@ echo $DATABASE_URL     # env vars are loaded automatically
 | Feature | direnv | mise | **envee** |
 |---|---|---|---|
 | Config format | bash (`.envrc`) | TOML | **TOML (`envee.toml`)** |
-| Trust model | hash | hash | **hash + static analysis** (`envee check`; ed25519 signing is planned) |
+| Trust model | hash | hash | **hash + static analysis** (`envee check`) **+ ed25519-signed approvals** |
 | Profiles (dev/staging/prod) | manual `source_env` | `MISE_ENV=dev` | **first-class `[profiles.X]`** |
 | Required vars | none | `required = true` | **`required = true` per profile** |
 | Redaction | none | `redact = true` | **`redact = true` by default for secrets** |
-| Secret plugins | none | none | **exec-based, 1Password/AWS/Vault/local** |
-| Script sandbox | none (RCE) | none | **WASM (wazero) — planned, not implemented** |
+| Secret plugins | none | none | **exec-based: local store, Infisical, 1Password, SOPS** |
+| Script sandbox | none (RCE) | none | **none — no script layer; WASM is planned, not implemented** |
+| Migration from direnv | — | — | **`envee import` converts `.envrc`** |
 | Shell hook overhead | ~5–15ms | ~5ms | **~0ms when nothing changed** (shell builtins only) |
 | Cross-platform (macOS/Linux) | ✅ | ✅ | **✅ single static binary (~1 MB)** |
 | Homebrew distribution | ✅ homebrew-core | ✅ homebrew-core | **✅ custom tap, prebuilt archives published on every tag** |
@@ -51,14 +52,14 @@ brew install baken667/tap/envee
 # Direct download: a prebuilt archive for linux/macOS (amd64, arm64) and
 # windows (amd64), with checksums signed via Sigstore, from
 # https://github.com/baken667/envee/releases
-tar -xzf envee_*_linux_amd64.tar.gz && sudo install envee envee-plugin-env /usr/local/bin/
+tar -xzf envee_*_linux_amd64.tar.gz && sudo install envee_*/envee envee_*/envee-plugin-* /usr/local/bin/
 
 # From source (Zig 0.16)
-zig build -Doptimize=ReleaseSafe && sudo install zig-out/bin/envee zig-out/bin/envee-plugin-env /usr/local/bin/
+zig build -Doptimize=ReleaseSafe && sudo install zig-out/bin/envee zig-out/bin/envee-plugin-* /usr/local/bin/
 ```
 
 The archive contains `envee` and the bundled plugins (`envee-plugin-env`,
-`envee-plugin-infisical`). All of them must be on `$PATH`.
+`-infisical`, `-op`, `-sops`). All of them must be on `$PATH`.
 
 ### Wire up your shell
 
@@ -153,14 +154,15 @@ overrides both). `envee doctor` prints the exact paths on your machine.
 | `envee exec -- <cmd>` | Run a command with the loaded env |
 | `envee check` | Static analysis of `envee.toml` |
 | `envee secret set/unset/list/get` | Manage the local `envee-plugin-env` store |
-| `envee doctor` | Health diagnostics |
+| `envee doctor [--fix]` | Health diagnostics; `--fix` adds a missing shell hook and makes secrets private |
+| `envee import [.envrc]` | Convert a direnv `.envrc` into `envee.toml` |
 | `envee plugin list/info` | Inspect discovered plugins |
 | `envee daemon status` | Check whether the optional `enveed` daemon is running |
 | `envee version` | Show envee version |
 
 Planned, and currently hidden from `--help` because they are not implemented:
 `envee plugin install`, `envee daemon start/stop`, `envee upgrade`,
-`envee debug`, `envee telemetry enable/disable` and `envee doctor --fix`.
+`envee debug` and `envee telemetry enable/disable`.
 They exit non-zero rather than pretending to succeed.
 
 Error codes and exit codes are documented in [docs/errors.md](docs/errors.md).
@@ -200,10 +202,10 @@ Shipped:
 |---|---|
 | `envee-plugin-env` | Local key-value store (`envee secret set KEY=VAL`) |
 | `envee-plugin-infisical` | [Infisical](https://infisical.com) through the `infisical` CLI (see below) |
-| `envee-plugin-op` | (Phase 3) 1Password CLI |
-| `envee-plugin-aws` | (Phase 3) AWS Secrets Manager / SSO |
-| `envee-plugin-vault` | (Phase 3) HashiCorp Vault |
-| `envee-plugin-sops` | (Phase 3) Mozilla SOPS |
+| `envee-plugin-op` | [1Password](https://1password.com) through the `op` CLI (see below) |
+| `envee-plugin-sops` | [SOPS](https://getsops.io)-encrypted YAML/JSON files through the `sops` CLI (see below) |
+
+Planned: AWS Secrets Manager and HashiCorp Vault.
 
 ### Infisical
 
@@ -229,17 +231,65 @@ CLI runs in the directory of your `envee.toml`, where `.infisical.json`
 normally lives. Failures carry the CLI's own message (`not_found`,
 `unauthenticated`, `no_project`, `not_installed`, `timeout`).
 
+### 1Password
+
+`envee-plugin-op` runs `op read` with a [secret
+reference](https://developer.1password.com/docs/cli/secret-references/).
+Install the CLI (`brew install 1password-cli`) and sign in — the desktop
+app integration, `OP_ACCOUNT` and `OP_SERVICE_ACCOUNT_TOKEN` in CI all work
+as they do for `op` itself.
+
+```toml
+[env]
+DB_PASSWORD = { source = "op", ref = "op://Dev/postgres/password", redact = true }
+```
+
+The `op://` prefix is optional; `vault/item/[section/]field` is accepted.
+
+### SOPS
+
+`envee-plugin-sops` decrypts one value from a SOPS-encrypted YAML or JSON
+file. The file is relative to the directory of `envee.toml`, where `sops`
+also finds your `.sops.yaml`; keys (age, PGP, cloud KMS) are located by
+`sops` as usual (`SOPS_AGE_KEY_FILE`, ...).
+
+```toml
+[env]
+# ref = "FILE#KEY[.KEY...]"
+DB_PASSWORD = { source = "sops", ref = "secrets.enc.yaml#db.password", redact = true }
+```
+
 Write your own plugin in 30 lines using [`pkg/sdk-go`](pkg/sdk-go/) — the Go
 SDK is a separate module (`github.com/baken667/envee/pkg/sdk-go`) and works
 unchanged with the Zig core. The wire protocol is in
 [ADR-0007](docs/adr/0007-plugin-protocol.md); a plugin can be written in any
 language that can read stdin and print JSON.
 
+## Migrating from direnv
+
+`envee import` turns an `.envrc` into an `envee.toml` next to it. The
+`.envrc` is parsed, not executed, and left untouched.
+
+```bash
+cd ~/work/myproj
+envee import            # writes envee.toml (--stdout to preview)
+envee check && envee trust
+```
+
+`export`, `unset`, `PATH_add`, `path_add PATH`, `export PATH=dir:$PATH`,
+`dotenv`, `dotenv_if_exists`, `watch_file` and `source_up` are converted.
+Anything that needs bash — `$(...)`, conditionals, `use nix`, `layout` — is
+listed in a *MANUAL REVIEW* block at the top of the result instead of being
+dropped: move those values into a `.env` file loaded with `_.file`, or into
+a secret plugin.
+
+Then swap the hook in your shell rc: remove `eval "$(direnv hook zsh)"`,
+add `eval "$(envee init zsh)"` (or run `envee doctor --fix`).
+
 ## Documentation
 
 - [docs/errors.md](docs/errors.md) — every error code, what causes it, how to fix it
-- [PLAN.md](PLAN.md) — high-level competitive analysis (Russian)
-- [ROADMAP.md](ROADMAP.md) — A/B/C implementation plan (Russian)
+- [PLAN.md](PLAN.md), [ROADMAP.md](ROADMAP.md) — the original research and plan (Russian); historical, written for the Go version
 - [docs/adr/](docs/adr/) — 20 Architecture Decision Records
 - [docs/zig-rewrite.md](docs/zig-rewrite.md), [docs/zig-rewrite-steps.md](docs/zig-rewrite-steps.md) — how the Go → Zig rewrite was done, step by step, including the Go bugs it found (Russian)
 - [examples/](examples/) — example projects
@@ -251,7 +301,7 @@ implemented. 0.4.2 is the first release of the Zig implementation; upgrading
 from 0.3.x requires one `envee trust` per project, because the content hash
 is computed differently (see [ADR-0020](docs/adr/0020-canonical-hash-v2.md)).
 
-Modules with tests (`zig build test`, ~360 tests):
+Modules with tests (`zig build test`, ~380 tests):
 
 ```
   src/env.zig, dotenv.zig, template.zig, path.zig, paths.zig, errs.zig, log.zig
@@ -261,19 +311,22 @@ Modules with tests (`zig build test`, ~360 tests):
                       run through the real shells when they are installed)
   src/trust/         (store, summary, OpenSSH ed25519 keys, signatures —
                       cross-checked against entries signed by the Go version)
-  src/plugin.zig, plugins/env.zig, secret_store.zig
+  src/plugin.zig, secret_store.zig
+  src/plugins/       (env, infisical, op, sops; the CLI-backed ones are driven
+                      against a fake CLI and were checked against the real one)
   src/cli/           (every command, driven through the same code path as main)
   pkg/sdk-go         (plugin wire protocol, driven end to end as a subprocess)
 ```
 
-Windows builds but is not tested; treat it as experimental.
+Windows is experimental: the test suite runs there in CI, and `pwsh` is the
+supported shell. The bash, zsh and fish hooks are not tested on Windows.
 
 ## Development
 
 Requires Zig 0.16.0 exactly (`build.zig.zon` pins it).
 
 ```bash
-zig build                 # ./zig-out/bin/envee and ./zig-out/bin/envee-plugin-env
+zig build                 # ./zig-out/bin/envee and the bundled plugins
 zig build test            # unit tests (add --summary all to see the count)
 zig fmt --check src build.zig
 zig build release         # cross-compile every release target into zig-out/release/

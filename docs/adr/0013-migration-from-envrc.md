@@ -3,6 +3,9 @@
 - **Статус**: Accepted
 - **Дата**: 2026-09-08
 - **Решает**: Как user'ам перейти с direnv на envee без большого рефакторинга
+- **Реализовано (0.5)**: только `envee import`, и в урезанном виде — см.
+  «Что реализовано» в конце. Режим совместимости, WASM-заглушки и
+  `.envrc.compat.toml` не сделаны.
 
 ## Контекст
 
@@ -283,3 +286,20 @@ Diagnostics:
 
 - Compatibility mode — opt-in (default = warning при `.envrc` без `envee.toml`).
 - Per-project migration tracking (out of scope MVP, Phase 2).
+
+## Что реализовано
+
+`envee import [.envrc]` (`src/cli/import.zig`):
+
+- `.envrc` разбирается построчно и **не исполняется**; `.envrc.backup` не
+  нужен, потому что исходный файл не трогается.
+- Переводятся `export` (кавычки, `$VAR`, `${VAR}`, `$PWD` →
+  `{{config_root}}`, `~`), `unset` (→ `false`), `PATH_add`, `path_add PATH`,
+  `export PATH=dir:$PATH`, `dotenv`, `dotenv_if_exists`, `watch_file`,
+  `source_up`.
+- Всё остальное дословно попадает в блок `MANUAL REVIEW` в начале
+  результата. Строка переводится целиком или не переводится вовсе.
+- WASM-заглушки не генерируются: слоя скриптов нет. Режим совместимости с
+  прокси в direnv не сделан — он вернул бы исполнение bash, от которого
+  envee уходит; миграция проект за проектом возможна и без него, потому что
+  direnv и envee смотрят на разные файлы.

@@ -390,6 +390,10 @@ fn runEscapeRoundTrip(
     shell_bin: []const u8,
     escaped: []const u8,
 ) !?[]u8 {
+    // POSIX-оболочки на Windows (Git Bash, MSYS) переписывают `\` в argv,
+    // который им передаёт Windows-процесс, так что проверка сравнивала бы
+    // их преобразование, а не наше экранирование.
+    if (@import("builtin").os.tag == .windows) return null;
     const script = try std.fmt.allocPrint(gpa, "printf '%s' {s}", .{escaped});
     defer gpa.free(script);
 

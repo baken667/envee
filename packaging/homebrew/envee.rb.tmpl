@@ -33,6 +33,8 @@ class Envee < Formula
     bin.install "envee"
     bin.install "envee-plugin-env"
     bin.install "envee-plugin-infisical"
+    bin.install "envee-plugin-op"
+    bin.install "envee-plugin-sops"
     generate_completions_from_executable(bin/"envee", "completion")
   end
 
@@ -51,6 +53,8 @@ class Envee < Formula
     assert_match "add-zsh-hook", shell_output("#{bin}/envee init zsh")
     assert_match "_envee_hook", shell_output("#{bin}/envee init fish")
     assert_match "\"name\":\"env\"", shell_output("#{bin}/envee-plugin-env metadata")
-    assert_match "\"name\":\"infisical\"", shell_output("#{bin}/envee-plugin-infisical metadata")
+    %w[infisical op sops].each do |p|
+      assert_match "\"name\":\"#{p}\"", shell_output("#{bin}/envee-plugin-#{p} metadata")
+    end
   end
 end

@@ -318,7 +318,7 @@ pub fn pluginNotFound(gpa: Allocator, source: []const u8, context: *[2]KV) FailE
         .code = .e009,
         .summary = "secret plugin not found",
         .context = context,
-        .hint = try std.fmt.allocPrint(gpa, "Install with: brew install baken/tap/envee-plugin-{s}", .{source}),
+        .hint = try std.fmt.allocPrint(gpa, "Put envee-plugin-{s} on $PATH. The env, infisical, op and sops plugins ship in the same archive as envee.", .{source}),
     }, error.PluginNotFound);
 }
 

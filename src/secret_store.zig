@@ -28,12 +28,21 @@ pub const LoadError = error{
 
 pub const SaveError = error{WriteFailed} || Allocator.Error;
 
+/// На Windows HOME обычно не задан (его ставят только Git Bash и MSYS), и
+/// без запасного варианта путь выходил относительным — секреты ложились в
+/// `.local\share` того каталога, откуда запущен envee.
+fn home(environ: *const std.process.Environ.Map) []const u8 {
+    if (environ.get("HOME")) |h| if (h.len > 0) return h;
+    if (@import("builtin").os.tag == .windows) return environ.get("USERPROFILE") orelse "";
+    return "";
+}
+
 pub fn path(arena: Allocator, environ: *const std.process.Environ.Map) Allocator.Error![]const u8 {
     const xdg = environ.get("XDG_DATA_HOME") orelse "";
     const dir = if (xdg.len > 0)
         xdg
     else
-        try std.fs.path.join(arena, &.{ environ.get("HOME") orelse "", ".local", "share" });
+        try std.fs.path.join(arena, &.{ home(environ), ".local", "share" });
     return std.fs.path.join(arena, &.{ dir, "envee", "secrets", "env.json" });
 }
 
@@ -122,9 +131,10 @@ test "the store path follows XDG_DATA_HOME and falls back to ~/.local/share" {
 
     var environ: std.process.Environ.Map = .init(a);
     try environ.put("HOME", "/home/u");
-    try testing.expectEqualStrings("/home/u/.local/share/envee/secrets/env.json", try path(a, &environ));
+    const j = std.fs.path.join;
+    try testing.expectEqualStrings(try j(a, &.{ "/home/u", ".local", "share", "envee", "secrets", "env.json" }), try path(a, &environ));
     try environ.put("XDG_DATA_HOME", "/data");
-    try testing.expectEqualStrings("/data/envee/secrets/env.json", try path(a, &environ));
+    try testing.expectEqualStrings(try j(a, &.{ "/data", "envee", "secrets", "env.json" }), try path(a, &environ));
 }
 
 test "render matches Go's MarshalIndent and parse reads it back" {

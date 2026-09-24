@@ -1,5 +1,9 @@
 # Roadmap: A + B + C — eval, trust TUI, plugin SDK
 
+> **Исторический документ.** Написан до первой строки кода, под Go-версию.
+> Текущее состояние — в [README](README.md) и [CHANGELOG](CHANGELOG.md);
+> решения, принятые после, — в [docs/adr/](docs/adr/).
+
 > **Цель**: довести envee до состояния, в котором он реально работает end-to-end —
 > загружает TOML, разрешает templates, диффует с OS env, выдаёт shell-команды,
 > защищён trust-flow'ом, и расширяется через плагины (начинаем с `envee-plugin-env`).

@@ -19,6 +19,7 @@
 
 const std = @import("std");
 const perms = @import("../perms.zig");
+const gopath = @import("../path.zig");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -214,8 +215,12 @@ pub const Store = struct {
         return std.fs.path.join(arena, &.{ s.root, name });
     }
 
+    /// Запрет ищется по пути, поэтому путь нормализуется здесь, в одном
+    /// месте для записи и проверки: `/p/./envee.toml` и `/p/envee.toml` —
+    /// один файл, и запрет одного обязан действовать на другой. Для уже
+    /// чистого пути ключ не меняется, так что старые запреты читаются.
     fn denyPath(s: Store, arena: Allocator, file_path: []const u8) Allocator.Error![]const u8 {
-        const name = try std.fmt.allocPrint(arena, "{s}.json", .{pathHash(file_path)});
+        const name = try std.fmt.allocPrint(arena, "{s}.json", .{pathHash(try gopath.clean(arena, file_path))});
         return std.fs.path.join(arena, &.{ s.root, "deny", name });
     }
 
@@ -524,6 +529,8 @@ test "deny survives an edit and outranks an approval" {
 
     // Явный запрет сильнее оставшегося одобрения.
     try testing.expectEqual(Status.denied, try ts.store.status(a, "/p/envee.toml", "sha256:abc"));
+    // Другое написание того же пути запрет не обходит.
+    try testing.expectEqual(Status.denied, try ts.store.status(a, "/p/./sub/../envee.toml", "sha256:abc"));
     // И переживает изменение содержимого.
     try testing.expectEqual(Status.denied, try ts.store.status(a, "/p/envee.toml", "sha256:edited"));
 
@@ -616,10 +623,10 @@ test "the entry file has restrictive permissions" {
 
     const path = try std.fs.path.join(a, &.{ ts.root, "abc.json" });
     const st = try std.Io.Dir.cwd().statFile(test_io, path, .{});
-    try testing.expectEqual(@as(std.posix.mode_t, 0o600), st.permissions.toMode() & 0o777);
+    if (perms.modeOf(st.permissions)) |m| try testing.expectEqual(@as(u32, 0o600), m);
 
     const dir_st = try std.Io.Dir.cwd().statFile(test_io, ts.root, .{});
-    try testing.expectEqual(@as(std.posix.mode_t, 0o700), dir_st.permissions.toMode() & 0o777);
+    if (perms.modeOf(dir_st.permissions)) |m| try testing.expectEqual(@as(u32, 0o700), m);
 
     // Временных файлов после успешной записи остаться не должно.
     var dir = try std.Io.Dir.cwd().openDir(test_io, ts.root, .{ .iterate = true });
