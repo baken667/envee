@@ -24,11 +24,11 @@ pub fn main(init: std.process.Init) !void {
     // Буфер stdout большой намеренно: вывод eval уходит целиком в подстановку
     // команд оболочки, и дробить его на записи незачем.
     var stdout_buf: [16 * 1024]u8 = undefined;
-    var stdout_file: Io.File.Writer = .init(.stdout(), io, &stdout_buf);
+    var stdout_file: Io.File.Writer = .initStreaming(.stdout(), io, &stdout_buf);
     const out = &stdout_file.interface;
 
     var stderr_buf: [4096]u8 = undefined;
-    var stderr_file: Io.File.Writer = .init(.stderr(), io, &stderr_buf);
+    var stderr_file: Io.File.Writer = .initStreaming(.stderr(), io, &stderr_buf);
     const err_out = &stderr_file.interface;
 
     const code = dispatch(arena, io, init, out, err_out) catch |err| blk: {

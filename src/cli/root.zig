@@ -63,10 +63,10 @@ pub const root: args_mod.Command = .{
     \\and supports profiles, secret plugins, and an opt-in WASM script layer.
     \\
     \\Get started:
-    \\  envee init bash >> ~/.bashrc   # add the shell hook
-    \\  cd ~/work/myproj               # enter a project with envee.toml
-    \\  envee trust                    # approve the project once
-    \\  echo $DATABASE_URL             # env vars are now loaded
+    \\  echo 'eval "$(envee init bash)"' >> ~/.bashrc   # add the shell hook
+    \\  cd ~/work/myproj                                # enter a project with envee.toml
+    \\  envee trust                                     # approve the project once
+    \\  echo $DATABASE_URL                              # env vars are now loaded
     ,
     .flags = &persistent_flags,
     .subcommands = &.{

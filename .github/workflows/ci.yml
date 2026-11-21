@@ -70,6 +70,11 @@ jobs:
             ./zig-out/bin/envee-plugin-$p metadata | grep -q "\"name\":\"$p\""
           done
           for f in examples/*/envee.toml; do ./zig-out/bin/envee check "$f"; done
+          # Appending must append: 0.5.0 wrote at offset 0 and clobbered the
+          # file, which is what `envee init bash >> ~/.bashrc` runs into.
+          printf 'keep\n' > smoke.txt
+          ./zig-out/bin/envee version >> smoke.txt
+          head -1 smoke.txt | grep -q '^keep' || (echo "envee overwrote a file it was appended to"; exit 1)
 
       - name: Untrusted eval must be refused
         # The whole point of the trust model. Exit code 3 is "trust required"
