@@ -291,7 +291,9 @@ pub fn parse(
         .path = try path.toOwnedSlice(gpa),
         .command = current,
         .args = try args.toOwnedSlice(gpa),
-        .help = want_help,
+        // Группа без подкоманды сама ничего не делает — показываем её
+        // справку, как cobra. Раньше `envee secret` доходил до unreachable.
+        .help = want_help or (!want_version and current.subcommands.len > 0 and current.args == .none),
         .version = want_version,
         .values = try values.toOwnedSlice(gpa),
     };
@@ -613,7 +615,11 @@ test "a bare invocation selects the root command" {
     const p = try parseArgs(a, &.{});
     try testing.expectEqualStrings("envee", p.command.name);
     try testing.expectEqual(@as(usize, 0), p.args.len);
-    try testing.expect(!p.help);
+    // Группа без подкоманды показывает справку — и корень, и вложенная.
+    try testing.expect(p.help);
+    try testing.expect((try parseArgs(a, &.{"secret"})).help);
+    try testing.expect(!(try parseArgs(a, &.{"--version"})).help);
+    try testing.expect(!(try parseArgs(a, &.{ "secret", "list" })).help);
 }
 
 test "subcommands, including nested ones" {

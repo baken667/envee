@@ -190,9 +190,12 @@ fn collectValue(
     switch (value) {
         .table => |sub| try collect(gpa, lines, path, sub),
         .array => |items| {
-            // Массив таблиц раскрывается по индексам: таблицы внутри него
-            // сами содержат ключи, и склеить их в одну строку нельзя.
-            if (items.len > 0 and items[0] == .table) {
+            // Массив с таблицами раскрывается по индексам: таблицы внутри
+            // него сами содержат ключи, и склеить их в одну строку нельзя.
+            // Смотреть надо на ВСЕ элементы, а не на первый: иначе в
+            // `[".env", { path = "x" }]` таблица уходила в хеш как `{}`, и
+            // её содержимое менялось без повторного одобрения.
+            if (holdsTable(items)) {
                 for (items, 0..) |item, i| {
                     const saved = path.items.len;
                     defer path.shrinkRetainingCapacity(saved);
@@ -219,6 +222,18 @@ fn collectValue(
             try lines.append(gpa, try gpa.dupe(u8, line.items));
         },
     }
+}
+
+/// Есть ли в массиве таблица, на любой глубине вложенности.
+fn holdsTable(items: []const Value) bool {
+    for (items) |item| {
+        switch (item) {
+            .table => return true,
+            .array => |inner| if (holdsTable(inner)) return true,
+            else => {},
+        }
+    }
+    return false;
 }
 
 fn writeScalarValue(gpa: Allocator, out: *std.ArrayList(u8), value: Value) CanonicalError!void {
@@ -451,6 +466,30 @@ test "arrays of tables expand by index" {
     var swapped = [_]Value{ items[1], items[0] };
     const other = try buildTable(a, &.{.{ "file", .{ .array = &swapped } }});
     try testing.expect(!std.mem.eql(u8, try canonicalHash(a, t), try canonicalHash(a, other)));
+}
+
+test "a table after a scalar in an array still reaches the hash" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // `_.file = [".env", { path = ".env.local" }]` — документированная запись.
+    var items = [_]Value{
+        .{ .string = ".env" },
+        .{ .table = try buildTable(a, &.{.{ "path", .{ .string = ".env.local" } }}) },
+    };
+    const t = try buildTable(a, &.{.{ "file", .{ .array = &items } }});
+    try testing.expectEqualStrings(
+        \\"file"[0] = ".env"
+        \\"file"[1]."path" = ".env.local"
+        \\
+    , try canonical(a, t));
+
+    // То же для таблицы во вложенном массиве.
+    var inner = [_]Value{items[1]};
+    var outer = [_]Value{ .{ .integer = 1 }, .{ .array = &inner } };
+    const nested = try buildTable(a, &.{.{ "x", .{ .array = &outer } }});
+    try testing.expect(std.mem.indexOf(u8, try canonical(a, nested), ".env.local") != null);
 }
 
 test "the hash is a sha256 hex string with a prefix" {

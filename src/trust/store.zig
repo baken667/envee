@@ -160,7 +160,7 @@ pub const Store = struct {
     }
 
     pub fn deny(s: Store, arena: Allocator, file_path: []const u8) Error!void {
-        const path = try s.denyPath(arena, file_path);
+        const path = (try s.denyPaths(arena, file_path))[0];
         if (std.fs.path.dirname(path)) |dir| {
             _ = try std.Io.Dir.cwd().createDirPathStatus(s.io, dir, perms.fromMode(0o700));
         }
@@ -173,11 +173,12 @@ pub const Store = struct {
     }
 
     pub fn undeny(s: Store, arena: Allocator, file_path: []const u8) Error!void {
-        const path = try s.denyPath(arena, file_path);
-        std.Io.Dir.cwd().deleteFile(s.io, path) catch |err| switch (err) {
-            error.FileNotFound => {},
-            else => return err,
-        };
+        for (try s.denyPaths(arena, file_path)) |path| {
+            std.Io.Dir.cwd().deleteFile(s.io, path) catch |err| switch (err) {
+                error.FileNotFound => {},
+                else => return err,
+            };
+        }
     }
 
     /// Все записи хранилища, свежие первыми.
@@ -205,9 +206,10 @@ pub const Store = struct {
     }
 
     fn isDenied(s: Store, arena: Allocator, file_path: []const u8) Error!bool {
-        const path = try s.denyPath(arena, file_path);
-        _ = std.Io.Dir.cwd().statFile(s.io, path, .{}) catch return false;
-        return true;
+        for (try s.denyPaths(arena, file_path)) |path| {
+            if (std.Io.Dir.cwd().statFile(s.io, path, .{})) |_| return true else |_| {}
+        }
+        return false;
     }
 
     fn entryPath(s: Store, arena: Allocator, hash: []const u8) Allocator.Error![]const u8 {
@@ -217,10 +219,26 @@ pub const Store = struct {
 
     /// Запрет ищется по пути, поэтому путь нормализуется здесь, в одном
     /// месте для записи и проверки: `/p/./envee.toml` и `/p/envee.toml` —
-    /// один файл, и запрет одного обязан действовать на другой. Для уже
-    /// чистого пути ключ не меняется, так что старые запреты читаются.
-    fn denyPath(s: Store, arena: Allocator, file_path: []const u8) Allocator.Error![]const u8 {
-        const name = try std.fmt.allocPrint(arena, "{s}.json", .{pathHash(try gopath.clean(arena, file_path))});
+    /// один файл, и запрет одного обязан действовать на другой.
+    ///
+    /// Ключей два. Первый — с раскрытыми симлинками в КАТАЛОГЕ: запрет,
+    /// записанный через `/tmp/p` (на macOS это ссылка на `/private/tmp/p`),
+    /// обязан сработать, когда конфиг найден по настоящему пути. Имя файла
+    /// при этом остаётся как есть: раскрой и его — и подмена `envee.toml`
+    /// симлинком сменила бы ключ и сняла запрет. Второй ключ — чисто
+    /// лексический, каким он был до 0.5.1: старые запреты продолжают
+    /// действовать. Пишется первый, проверяются и снимаются оба.
+    fn denyPaths(s: Store, arena: Allocator, file_path: []const u8) Allocator.Error![2][]const u8 {
+        const clean = try gopath.clean(arena, file_path);
+        const lexical = try s.denyFile(arena, clean);
+        const dir = std.fs.path.dirname(clean) orelse return .{ lexical, lexical };
+        const real_dir: []const u8 = std.Io.Dir.cwd().realPathFileAlloc(s.io, dir, arena) catch dir;
+        const real = try std.fs.path.join(arena, &.{ real_dir, std.fs.path.basename(clean) });
+        return .{ try s.denyFile(arena, real), lexical };
+    }
+
+    fn denyFile(s: Store, arena: Allocator, path: []const u8) Allocator.Error![]const u8 {
+        const name = try std.fmt.allocPrint(arena, "{s}.json", .{pathHash(path)});
         return std.fs.path.join(arena, &.{ s.root, "deny", name });
     }
 

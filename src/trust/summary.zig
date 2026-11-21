@@ -90,11 +90,13 @@ pub fn build(arena: Allocator, cfg: config.Config) Allocator.Error!Summary {
         if (std.mem.eql(u8, k, "_") or config.isMetaKey(k)) continue;
 
         if (v.asTable()) |t| {
-            if (t.get("redact")) |r| {
-                if (r.asBool() orelse false) {
-                    try redacted.append(arena, k);
-                    continue;
-                }
+            // Ссылка на секрет скрыта всегда, флаг ей не нужен.
+            const source: []const u8 = if (t.get("source")) |src| (src.asString() orelse "") else "";
+            const secret = source.len > 0;
+            const marked = if (t.get("redact")) |r| (r.asBool() orelse false) else false;
+            if (secret or marked) {
+                try redacted.append(arena, k);
+                continue;
             }
         }
         if (nameLooksSensitive(k)) try redacted.append(arena, k);

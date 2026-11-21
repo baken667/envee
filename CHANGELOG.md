@@ -9,6 +9,78 @@ the curated view.
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-11-22
+
+### Security
+
+- **A variable name could run a command.** Names were written into the shell
+  code the hook evaluates without any check, so a JSON file loaded with
+  `_.file` holding the key `A;cmd;B` executed `cmd` on `cd`. A name must now
+  be an identifier — letters, digits and underscores, not starting with a
+  digit — whatever it came from; anything else is E003. This also refuses
+  dotted names, which nested JSON and TOML files produce (`app.name`): no
+  supported shell could export them.
+- **The trust hash ignored tables inside mixed arrays.** In
+  `_.file = [".env", { path = ".env.local" }]` the table was hashed as `{}`,
+  so its contents could change after `envee trust` without a new approval.
+  An array is now expanded whenever it holds a table at any depth. Configs
+  that use this form get a different hash and **need one `envee trust`**;
+  every other config keeps its approval.
+- **Files loaded with `_.file` may no longer set variables that lead to code
+  execution.** The contents of those files are not covered by the trust
+  hash, so a changed `.env` could run a command without a new approval.
+  Refused, in any letter case: what a shell or the dynamic loader runs
+  (`PROMPT_COMMAND`, `BASH_ENV`, `PS0`–`PS4`, zsh's `PROMPT`/`RPROMPT`
+  family, `SHELLOPTS`, `BASHOPTS`, `IFS`, `ZDOTDIR`, `FPATH`, `MODULE_PATH`,
+  `fish_function_path`, `fish_complete_path`, `PSModulePath`, `LD_PRELOAD`,
+  `LD_AUDIT`, `LD_LIBRARY_PATH`, `DYLD_*`) and what tells envee where its
+  trust store and global config are (`HOME`, `USERPROFILE`,
+  `XDG_CONFIG_HOME`, `XDG_DATA_HOME`) — a file could otherwise point envee at
+  approvals shipped in the repository. Set such a variable in `envee.toml`
+  itself. This is a mitigation, not a boundary; see
+  [SECURITY.md](SECURITY.md).
+- **A config could overwrite the shell hook's own variables.** The hook runs
+  `: > "$__envee_stamp"` right after applying the environment, so a `.env`
+  setting `__envee_stamp` emptied a file of its choosing. Names starting
+  with `__envee_` are now reserved, like `ENVEE_*`.
+- **PowerShell: a typographic quote in a value ended the string.** PowerShell
+  closes a single-quoted string on `‘`, `’`, `‚` and `‛` as well as on `'`;
+  only `'` was doubled, so a value such as `x’; cmd #` ran `cmd`. All five
+  are doubled now. Checked against the escaping rule, not in a live `pwsh`.
+- **`envee trust` took any unrecognised answer as yes.** Typing `nope`
+  approved the config, and so did asking for the diff eight times. An
+  unrecognised answer is now asked again, and running out of attempts is a
+  refusal.
+- **`envee diff` printed `redact = true` values in the clear.** They are now
+  hidden, as in `status` and `resolve`.
+- **Values from secret plugins are always hidden** in `status`, `resolve`
+  and `diff`, with or without `redact = true`, as ADR-0009 and the README
+  already said. `envee status --show-secrets` reveals them; `eval` and `exec`
+  are unaffected. `envee check` no longer warns about a secret without
+  `redact = true`, and `envee trust` no longer lists it as unredacted.
+
+### Fixed
+
+- **Redirecting envee's output into a file overwrote the file from the
+  start.** `envee completion zsh >> ~/.zshrc` destroyed the beginning of
+  `.zshrc`, and in `( echo header; envee resolve ) > out` envee wrote over
+  the header. stdout and stderr were opened in positional mode; they are
+  streams now. The bundled plugins had the same defect.
+- **`envee deny` could print `denied` and block nothing**: when given a
+  directory instead of the file, and when the path went through a symlink
+  (`/tmp/...` on macOS). A directory now means the `envee.toml` in it — for
+  `envee trust` too — and the deny list is keyed by the real path of the
+  directory. Denials recorded by earlier versions keep working.
+- **`envee secret` without a subcommand crashed**, and `envee` on its own
+  failed with E014. A command group without a subcommand prints its help.
+
+### Changed
+
+- The getting-started text in `envee --help` suggested
+  `envee init bash >> ~/.bashrc`, which froze a copy of the hook into the rc
+  file. It now shows `echo 'eval "$(envee init bash)"' >> ~/.bashrc`, as the
+  README does.
+
 ## [0.5.0] — 2026-09-18
 
 ### Added
@@ -379,7 +451,8 @@ green, and completions and man pages installed to the right prefixes.
 - `envee trust --sign` (ed25519) is not implemented.
 - The WASM script sandbox (`_.script`) is not implemented.
 
-[Unreleased]: https://github.com/baken667/envee/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/baken667/envee/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/baken667/envee/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/baken667/envee/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/baken667/envee/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/baken667/envee/compare/v0.3.0...v0.4.2

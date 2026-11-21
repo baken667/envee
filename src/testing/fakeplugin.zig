@@ -15,10 +15,10 @@ pub fn main(init: std.process.Init) !void {
     const mode = init.environ_map.get("FAKE_PLUGIN_MODE") orelse "";
 
     var out_buf: [4096]u8 = undefined;
-    var stdout_file: Io.File.Writer = .init(.stdout(), io, &out_buf);
+    var stdout_file: Io.File.Writer = .initStreaming(.stdout(), io, &out_buf);
     const out = &stdout_file.interface;
     var err_buf: [1024]u8 = undefined;
-    var stderr_file: Io.File.Writer = .init(.stderr(), io, &err_buf);
+    var stderr_file: Io.File.Writer = .initStreaming(.stderr(), io, &err_buf);
     const err_out = &stderr_file.interface;
 
     if (argv.len < 2) {

@@ -164,14 +164,23 @@ pub fn writeNuEscaped(w: *Writer, s: []const u8) Writer.Error!void {
 }
 
 /// Экранирование для одинарных кавычек PowerShell: внутренняя кавычка удваивается.
+///
+/// Кавычек у PowerShell пять: кроме ASCII `'` строку закрывают U+2018,
+/// U+2019, U+201A и U+201B. Удваивать только первую значило бы выпустить
+/// значение `x’; cmd #` из строки прямо в Invoke-Expression.
 pub fn writePwshEscaped(w: *Writer, s: []const u8) Writer.Error!void {
     if (s.len == 0) return w.writeAll("''");
     try w.writeByte('\'');
-    for (s) |c| {
-        if (c == '\'') {
+    var i: usize = 0;
+    while (i < s.len) : (i += 1) {
+        if (s[i] == '\'') {
             try w.writeAll("''");
+        } else if (s[i] == 0xE2 and i + 2 < s.len and s[i + 1] == 0x80 and s[i + 2] >= 0x98 and s[i + 2] <= 0x9B) {
+            try w.writeAll(s[i .. i + 3]);
+            try w.writeAll(s[i .. i + 3]);
+            i += 2;
         } else {
-            try w.writeByte(c);
+            try w.writeByte(s[i]);
         }
     }
     try w.writeByte('\'');
@@ -338,6 +347,11 @@ test "pwshEscape: inner quote is doubled" {
         .{ .in = "plain", .want = "'plain'" },
         .{ .in = "it's", .want = "'it''s'" },
         .{ .in = "'''", .want = "''''''''" },
+        // Типографские кавычки тоже закрывают строку — и тоже удваиваются.
+        .{ .in = "x\u{2019}; calc #", .want = "'x\u{2019}\u{2019}; calc #'" },
+        .{ .in = "\u{2018}\u{201A}\u{201B}", .want = "'\u{2018}\u{2018}\u{201A}\u{201A}\u{201B}\u{201B}'" },
+        // Соседний символ того же блока кавычкой не является.
+        .{ .in = "a\u{2014}b", .want = "'a\u{2014}b'" },
     };
     for (cases) |c| {
         const got = try pwshEscape(testing.allocator, c.in);

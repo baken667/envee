@@ -132,9 +132,9 @@ pub fn main(init: std.process.Init, comptime run: fn (Allocator, Io, Input, *Wri
     const argv = try init.minimal.args.toSlice(arena);
 
     var out_buf: [8192]u8 = undefined;
-    var stdout_file: Io.File.Writer = .init(.stdout(), io, &out_buf);
+    var stdout_file: Io.File.Writer = .initStreaming(.stdout(), io, &out_buf);
     var err_buf: [1024]u8 = undefined;
-    var stderr_file: Io.File.Writer = .init(.stderr(), io, &err_buf);
+    var stderr_file: Io.File.Writer = .initStreaming(.stderr(), io, &err_buf);
 
     var stdin: []const u8 = "";
     if (argv.len >= 2 and std.mem.eql(u8, argv[1], "resolve")) {

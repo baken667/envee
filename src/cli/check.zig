@@ -221,15 +221,6 @@ pub fn checkConfig(
                 });
             }
         }
-        if (!s.ref.redact) {
-            try out.append(arena, .{
-                .level = .warning,
-                .file = cfg.path,
-                .key = s.name,
-                .message = "secret is not marked redact = true",
-                .hint = "Its value will be printed in full by `envee status` and `envee diff`.",
-            });
-        }
     }
 
     // Пространство имён envee и гигиена учётных данных.
@@ -758,7 +749,7 @@ test "a missing secret plugin is a warning" {
     try testing.expectEqual(@as(usize, 0), present.len);
 }
 
-test "a secret without redact is a warning" {
+test "a secret without redact is not a warning: plugin values are always hidden" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -771,7 +762,7 @@ test "a secret without redact is a warning" {
         \\source = "vault"
         \\ref = "r"
     , false);
-    try testing.expect(has(got, .warning, "not marked redact"));
+    try testing.expect(!has(got, .warning, "redact"));
 }
 
 test "check reports a clean config and exits successfully" {
