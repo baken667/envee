@@ -73,6 +73,17 @@ pub fn runDiff(ctx: *Ctx, parsed: args_mod.Parsed, stop_at: []const u8) Error!vo
 
     const r = try context.resolveEnv(ctx, parsed.str("profile"), stop_at);
 
+    // Предпросмотр читает человек, поэтому скрытые значения в нём закрыты.
+    // Не изменившиеся не трогаем: writeShellDiff их и так не печатает, а
+    // с заглушкой вместо значения счёл бы изменёнными.
+    for (r.result.env.entries.items) |*e| {
+        if (!e.redacted) continue;
+        if (ctx.os_env.get(e.key)) |old| {
+            if (std.mem.eql(u8, old, e.value)) continue;
+        }
+        e.value = redacted_placeholder;
+    }
+
     if (!parsed.boolean("json")) {
         return context.writeShellDiff(ctx, ctx.stdout, adapter, r.result);
     }
@@ -186,6 +197,24 @@ test "diff prints what eval would, without the dependency list" {
     try testing.expectEqualStrings("export A=1;\n", out);
     // Список зависимостей читает hook, а не человек.
     try testing.expect(std.mem.indexOf(u8, out, "__envee_deps") == null);
+}
+
+test "diff hides redacted values" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const tmp = try harness.TempDir.create(a);
+    defer tmp.destroy();
+    try tmp.write(a, "[env]\nA = \"1\"\nKEY = { value = \"hunter2\", redact = true }\n");
+
+    const out = try harness.run(a, tmp, &.{ "diff", "bash" }, &.{.{ "PATH", "/usr/bin" }});
+    try testing.expect(std.mem.indexOf(u8, out, "hunter2") == null);
+    try testing.expect(std.mem.indexOf(u8, out, "export A=1;") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "export KEY=") != null);
+
+    // eval печатает настоящее значение: его исполняет оболочка.
+    const eval = try harness.run(a, tmp, &.{ "eval", "bash" }, &.{.{ "PATH", "/usr/bin" }});
+    try testing.expect(std.mem.indexOf(u8, eval, "hunter2") != null);
 }
 
 test "diff --json wraps the output" {

@@ -100,7 +100,7 @@ pub const Gate = struct {
 // ---- команды ---------------------------------------------------------------
 
 /// Что делать с конфигом по ответу пользователя.
-pub const Answer = enum { grant, deny, show_diff, skip, quit };
+pub const Answer = enum { grant, deny, show_diff, skip, quit, unclear };
 
 /// Источник ответа. Отдельный тип, чтобы тесты не изображали терминал.
 pub const Asker = struct {
@@ -113,11 +113,13 @@ pub const Asker = struct {
 };
 
 /// Разбор ответа. Пустая строка — согласие: вопрос задан с заглавной Y.
-/// Непонятный ответ тоже трактуется как согласие по умолчанию, как в Go.
+/// Непонятный ответ согласием НЕ считается (в Go считался): «nope» или
+/// опечатка одобряли конфиг, который человек одобрять не собирался.
 pub fn parseAnswer(line: []const u8) Answer {
     var buf: [16]u8 = undefined;
     const trimmed = std.mem.trim(u8, line, " \t\r\n");
-    if (trimmed.len == 0 or trimmed.len > buf.len) return .grant;
+    if (trimmed.len == 0) return .grant;
+    if (trimmed.len > buf.len) return .unclear;
     const lower = std.ascii.lowerString(buf[0..trimmed.len], trimmed);
 
     if (std.mem.eql(u8, lower, "y") or std.mem.eql(u8, lower, "yes")) return .grant;
@@ -125,7 +127,7 @@ pub fn parseAnswer(line: []const u8) Answer {
     if (std.mem.eql(u8, lower, "d") or std.mem.eql(u8, lower, "diff")) return .show_diff;
     if (std.mem.eql(u8, lower, "s") or std.mem.eql(u8, lower, "skip")) return .skip;
     if (std.mem.eql(u8, lower, "q") or std.mem.eql(u8, lower, "quit")) return .quit;
-    return .grant;
+    return .unclear;
 }
 
 const prompt_text = "Trust this file? [Y/n/d(iff)/s(kip)/q(uit)] ";
@@ -166,10 +168,13 @@ fn approve(ctx: *Ctx, parsed: args_mod.Parsed, asker: ?Asker) Error!void {
         // Показ содержимого не завершает разговор: после него спрашиваем
         // снова, иначе пользователь остался бы без возможности ответить.
         var attempts: usize = 0;
-        while (attempts < 8) : (attempts += 1) {
-            const answer = a.ask(prompt_text) catch return error.NotInteractive;
+        while (true) : (attempts += 1) {
+            // Исчерпанные попытки — отказ: раньше цикл просто кончался, и
+            // восемь «d» подряд одобряли конфиг.
+            const answer = if (attempts < 8) a.ask(prompt_text) catch return error.NotInteractive else .quit;
             switch (answer) {
                 .grant => break,
+                .unclear => try ctx.stderr.writeAll("[envee] please answer y, n, d, s or q\n"),
                 .deny, .quit => {
                     try ctx.stderr.writeAll("[envee] trust not granted\n");
                     return;
@@ -365,11 +370,17 @@ fn storeFor(ctx: *Ctx) store_mod.Store {
 
 /// Файл, о котором идёт речь: аргумент или `envee.toml` в текущем каталоге.
 fn targetPath(ctx: *Ctx, parsed: args_mod.Parsed) Allocator.Error![]const u8 {
-    if (parsed.args.len > 0) {
-        if (std.fs.path.isAbsolute(parsed.args[0])) return parsed.args[0];
-        return gopath.join(ctx.arena, &.{ ctx.cwd, parsed.args[0] });
-    }
-    return gopath.join(ctx.arena, &.{ ctx.cwd, "envee.toml" });
+    if (parsed.args.len == 0) return gopath.join(ctx.arena, &.{ ctx.cwd, "envee.toml" });
+    const path = if (std.fs.path.isAbsolute(parsed.args[0]))
+        parsed.args[0]
+    else
+        try gopath.join(ctx.arena, &.{ ctx.cwd, parsed.args[0] });
+
+    // Каталог значит «конфиг в этом каталоге». Раньше `envee deny dir`
+    // запрещал сам каталог, печатал «denied» и ничего не блокировал.
+    const st = std.Io.Dir.cwd().statFile(ctx.io, path, .{}) catch return path;
+    if (st.kind == .directory) return gopath.join(ctx.arena, &.{ path, "envee.toml" });
+    return path;
 }
 
 fn liftParseError(err: anyerror, path: []const u8, diag: config.Diagnostics) Error {
@@ -464,8 +475,10 @@ test "answer parsing" {
     try testing.expectEqual(Answer.show_diff, parseAnswer("diff"));
     try testing.expectEqual(Answer.skip, parseAnswer("s"));
     try testing.expectEqual(Answer.quit, parseAnswer("q"));
-    // Непонятный ответ — согласие по умолчанию, как в Go.
-    try testing.expectEqual(Answer.grant, parseAnswer("maybe"));
+    // Непонятный ответ — не согласие.
+    try testing.expectEqual(Answer.unclear, parseAnswer("maybe"));
+    try testing.expectEqual(Answer.unclear, parseAnswer("nope"));
+    try testing.expectEqual(Answer.unclear, parseAnswer("yes yes yes yes yes"));
 }
 
 test "trust approves, and eval then works" {
@@ -566,6 +579,53 @@ test "answering no leaves the config unapproved" {
         try testing.expect(std.mem.indexOf(u8, out.stderr, "[envee] trusted") == null);
         try testing.expectError(error.TrustRequired, harness.runReal(a, tmp, &.{ "eval", "bash" }, &.{}, null));
     }
+}
+
+test "an unclear answer is asked again, and running out of attempts is a refusal" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const tmp = try harness.TempDir.create(a);
+    defer tmp.destroy();
+    try tmp.write(a, "schema = \"envee/v1\"\n[env]\nA = \"1\"\n");
+
+    // Восемь «покажи файл» подряд раньше одобряли конфиг.
+    var stubborn: ScriptedAsker = .{ .answers = &(.{.show_diff} ** 12) };
+    const refused = try harness.runRealFull(a, tmp, &.{"trust"}, &.{}, stubborn.asker());
+    try testing.expectEqual(@as(usize, 8), stubborn.asked);
+    try testing.expect(std.mem.indexOf(u8, refused.stderr, "[envee] trusted") == null);
+    try testing.expectError(error.TrustRequired, harness.runReal(a, tmp, &.{ "eval", "bash" }, &.{}, null));
+
+    var unsure: ScriptedAsker = .{ .answers = &.{ .unclear, .grant } };
+    const out = try harness.runRealFull(a, tmp, &.{"trust"}, &.{}, unsure.asker());
+    try testing.expectEqual(@as(usize, 2), unsure.asked);
+    try testing.expect(std.mem.indexOf(u8, out.stderr, "please answer") != null);
+    try testing.expect(std.mem.indexOf(u8, out.stderr, "[envee] trusted") != null);
+}
+
+test "deny takes a directory, and survives the config becoming a symlink" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const tmp = try harness.TempDir.create(a);
+    defer tmp.destroy();
+    try tmp.write(a, "schema = \"envee/v1\"\n[env]\nA = \"1\"\n");
+
+    var yes: ScriptedAsker = .{ .answers = &.{.grant} };
+    _ = try harness.runReal(a, tmp, &.{"trust"}, &.{}, yes.asker());
+
+    // Каталог значит «конфиг в нём»: раньше печаталось «denied» впустую.
+    _ = try harness.runReal(a, tmp, &.{ "deny", tmp.path }, &.{}, null);
+    try testing.expectError(error.TrustDenied, harness.runReal(a, tmp, &.{ "eval", "bash" }, &.{}, null));
+
+    // Одобрение осталось в хранилище, поэтому запрет обязан держаться и
+    // после того, как файл подменили симлинком на то же содержимое.
+    if (@import("builtin").os.tag == .windows) return;
+    var dir = try std.Io.Dir.cwd().openDir(std.testing.io, tmp.path, .{});
+    defer dir.close(std.testing.io);
+    try dir.rename("envee.toml", dir, "real.toml", std.testing.io);
+    try dir.symLink(std.testing.io, "real.toml", "envee.toml", .{});
+    try testing.expectError(error.TrustDenied, harness.runReal(a, tmp, &.{ "eval", "bash" }, &.{}, null));
 }
 
 // Показ содержимого не должен завершать разговор: иначе ответить было бы
