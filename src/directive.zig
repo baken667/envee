@@ -532,7 +532,8 @@ fn applySecrets(
         try res.env.setEntry(arena, .{
             .key = s.name,
             .value = val,
-            .redacted = s.ref.redact,
+            // Секрет скрыт всегда, а не только с `redact = true`: ADR-0009.
+            .redacted = true,
             .source = try std.fmt.allocPrint(arena, "secret:{s}", .{s.ref.source}),
         });
     }
