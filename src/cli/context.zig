@@ -251,7 +251,25 @@ fn liftDirectiveError(err: anyerror, diag: directive.Diagnostics) Error {
                 .code = .e003,
                 .summary = "config may not set reserved variable",
                 .context = S.kv[0..1],
-                .hint = "Variables starting with ENVEE_ configure envee itself and cannot be set from a config file.",
+                .hint = "Variables starting with ENVEE_ configure envee itself, and __envee_ ones belong to its shell hook; neither can be set from a config file.",
+            }, error.ConfigValidation);
+        },
+        error.InvalidKey => {
+            S.kv = .{ .{ .key = "key", .value = diag.key }, .{ .key = "source", .value = diag.source } };
+            return errs.fail(.{
+                .code = .e003,
+                .summary = "invalid variable name",
+                .context = S.kv[0..2],
+                .hint = "A name may contain only letters, digits and underscores, and may not start with a digit.",
+            }, error.ConfigValidation);
+        },
+        error.UnsafeFileKey => {
+            S.kv = .{ .{ .key = "key", .value = diag.key }, .{ .key = "source", .value = diag.source } };
+            return errs.fail(.{
+                .code = .e003,
+                .summary = "variable may not be set from a _.file",
+                .context = S.kv[0..2],
+                .hint = "The shell runs this variable as code, and files loaded with _.file are not covered by `envee trust`. Set it in envee.toml instead.",
             }, error.ConfigValidation);
         },
         error.SecretMissingRef => {

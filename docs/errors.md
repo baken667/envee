@@ -48,10 +48,20 @@ The config parsed but is not valid. Common causes:
 
 - a secret is missing `source` or `ref`
 - `schema` names a version this build does not understand
-- the config tries to set a reserved `ENVEE_*` variable. These configure envee
-  itself; a config file may not set them, because envee exports its output
-  into your shell and one project could otherwise change envee's behaviour
-  everywhere else
+- the config tries to set a reserved `ENVEE_*` variable, or one of the shell
+  hook's own `__envee_*` variables. These configure envee itself; a config
+  file may not set them, because envee exports its output into your shell and
+  one project could otherwise change envee's behaviour everywhere else
+- a variable name is not an identifier (letters, digits and underscores, not
+  starting with a digit). The name is written into the shell code the hook
+  evaluates, so anything else — a dot from a nested JSON key, a `;` — is
+  refused rather than passed on
+- a file loaded with `_.file` sets a variable the shell or the dynamic loader
+  runs as code (`PROMPT_COMMAND`, `BASH_ENV`, `PS1`, `PROMPT`, `FPATH`,
+  `LD_PRELOAD`, `DYLD_*` and more), or one that tells envee where its trust
+  store is (`HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`). Those files are not
+  covered by `envee trust`; set such a variable in `envee.toml` itself, which
+  is
 - `envee check` found errors (or, with `--strict`, warnings)
 
 <a id="e004"></a>

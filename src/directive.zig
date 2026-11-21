@@ -110,6 +110,10 @@ pub const Error = error{
     RequiredVarMissing,
     /// Конфиг пытается задать переменную из пространства имён envee.
     ReservedKey,
+    /// Имя переменной не является идентификатором.
+    InvalidKey,
+    /// Файл `_.file` задаёт переменную, которую оболочка исполняет как код.
+    UnsafeFileKey,
     /// Сокращённая запись секрета без обязательного поля `ref`.
     SecretMissingRef,
     /// Обязательный секрет не разрешился.
@@ -241,15 +245,99 @@ pub fn apply(
         }
     }
 
-    // 9. Пространство имён envee закрыто для конфигов.
+    // 9. Имена. Проверка стоит в конце и потому покрывает все источники.
     for (res.env.entries.items) |e| {
-        if (std.mem.startsWith(u8, e.key, reserved_prefix)) {
+        // `__envee_*` — переменные самого hook'а: он делает `: > "$__envee_stamp"`
+        // сразу после eval, и конфиг, задавший её, обнулил бы любой файл.
+        if (std.mem.startsWith(u8, e.key, reserved_prefix) or std.mem.startsWith(u8, e.key, "__envee_")) {
             if (diag) |d| d.key = e.key;
             return error.ReservedKey;
+        }
+        // Имя уходит в `eval` оболочки как есть, без экранирования. Всё,
+        // что не идентификатор, там становится кодом: ключ `A;cmd;B` из
+        // JSON-файла исполнился бы при входе в каталог.
+        if (!isValidName(e.key)) {
+            if (diag) |d| d.* = .{ .key = e.key, .source = e.source };
+            return error.InvalidKey;
+        }
+        if (std.mem.startsWith(u8, e.source, "file:") and runsCode(e.key)) {
+            if (diag) |d| d.* = .{ .key = e.key, .source = e.source };
+            return error.UnsafeFileKey;
         }
     }
 
     return res;
+}
+
+/// Имя переменной, которое примет любая из поддерживаемых оболочек.
+pub fn isValidName(name: []const u8) bool {
+    if (name.len == 0 or std.ascii.isDigit(name[0])) return false;
+    for (name) |c| {
+        if (!std.ascii.isAlphanumeric(c) and c != '_') return false;
+    }
+    return true;
+}
+
+/// Переменные, которые нельзя задавать из `_.file`.
+///
+/// Содержимое этих файлов не входит в хеш доверия, и подменённый `.env`
+/// не должен получать то, что даёт исполнение кода без нового `envee trust`:
+///   - значение исполняет оболочка или загрузчик (`PROMPT_COMMAND`, `PS1`,
+///     `LD_PRELOAD`, пути автозагрузки функций zsh и fish);
+///   - переменная указывает envee, где лежат хранилище доверия и глобальный
+///     конфиг (`HOME`, `XDG_*`): файл подложил бы и одобрение, и конфиг.
+/// В самом `envee.toml` они разрешены — он одобряется целиком.
+///
+/// Регистр не учитывается: в Windows имена переменных его не различают.
+///
+/// ponytail: список заведомо неполон (GIT_SSH_COMMAND, NODE_OPTIONS, ENV и
+/// т.п. слишком часто встречаются в честных .env), и значение из файла всё
+/// ещё может попасть в такую переменную через шаблон в envee.toml. Полное
+/// решение — хеши файлов `_.file` в записи доверия.
+fn runsCode(name: []const u8) bool {
+    const names = [_][]const u8{
+        // bash
+        "PROMPT_COMMAND",
+        "BASH_ENV",
+        "PS0",
+        "PS1",
+        "PS2",
+        "PS3",
+        "PS4",
+        "SHELLOPTS",
+        "BASHOPTS",
+        "IFS",
+        // zsh: PROMPT и prompt — тот же параметр, что PS1
+        "PROMPT",
+        "PROMPT2",
+        "PROMPT3",
+        "PROMPT4",
+        "RPROMPT",
+        "RPROMPT2",
+        "RPS1",
+        "RPS2",
+        "SPROMPT",
+        "ZDOTDIR",
+        "FPATH",
+        "MODULE_PATH",
+        // fish, PowerShell
+        "fish_function_path",
+        "fish_complete_path",
+        "PSModulePath",
+        // загрузчик
+        "LD_PRELOAD",
+        "LD_AUDIT",
+        "LD_LIBRARY_PATH",
+        // где envee ищет хранилище доверия и глобальный конфиг
+        "HOME",
+        "USERPROFILE",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+    };
+    for (names) |n| {
+        if (std.ascii.eqlIgnoreCase(name, n)) return true;
+    }
+    return std.ascii.startsWithIgnoreCase(name, "DYLD_");
 }
 
 /// Приёмник для директивы `_.file`.
@@ -1023,6 +1111,49 @@ test "a config may not set envee's own variables" {
         .config_root = tmp.path,
         .os_env = &os_env,
     }, null, null));
+}
+
+test "a name that is not an identifier, or runs code from a file, is refused" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const tmp = try TempDir.create(a);
+    defer tmp.destroy();
+
+    var os_env: Env = .empty;
+    var diag: Diagnostics = .{};
+    const opts: Options = .{ .config_root = tmp.path, .os_env = &os_env };
+
+    // Ключ из JSON уходил в `eval` как есть и исполнялся.
+    try tmp.write(a, "vars.json", "{\"A;echo INJECTED;B\":\"1\"}");
+    const json = try config.parseBytes(a, "envee.toml", "[env]\n_.file = \"vars.json\"\n", null);
+    try testing.expectError(error.InvalidKey, apply(a, std.testing.io, json, opts, null, &diag));
+    try testing.expectEqualStrings("A;echo INJECTED;B", diag.key);
+    try testing.expectEqualStrings("file:vars.json", diag.source);
+
+    // Содержимое `_.file` не одобряется, поэтому исполняемое оттуда нельзя.
+    try tmp.write(a, ".env", "PROMPT_COMMAND=echo pwned\n");
+    const dotenv = try config.parseBytes(a, "envee.toml", "[env]\n_.file = \".env\"\n", null);
+    try testing.expectError(error.UnsafeFileKey, apply(a, std.testing.io, dotenv, opts, null, &diag));
+    try testing.expectEqualStrings("PROMPT_COMMAND", diag.key);
+
+    // Туда же: синоним PS1 в zsh, хранилище доверия самого envee и
+    // переменные hook'а (он делает `: > "$__envee_stamp"`).
+    inline for (.{ "prompt=x\n", "XDG_DATA_HOME=/repo/.x\n", "dyld_insert_libraries=x\n" }) |body| {
+        try tmp.write(a, ".env", body);
+        try testing.expectError(error.UnsafeFileKey, apply(a, std.testing.io, dotenv, opts, null, null));
+    }
+    try tmp.write(a, ".env", "__envee_stamp=/home/me/.ssh/authorized_keys\n");
+    try testing.expectError(error.ReservedKey, apply(a, std.testing.io, dotenv, opts, null, null));
+
+    // В самом envee.toml — можно: он одобряется целиком.
+    const toml = try config.parseBytes(a, "envee.toml", "[env]\nPROMPT_COMMAND = \"date\"\n", null);
+    _ = try apply(a, std.testing.io, toml, opts, null, null);
+
+    try testing.expect(isValidName("_A1"));
+    try testing.expect(!isValidName("1A"));
+    try testing.expect(!isValidName("a.b"));
+    try testing.expect(!isValidName(""));
 }
 
 test "meta keys never become variables" {
